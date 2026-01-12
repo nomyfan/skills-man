@@ -39,13 +39,15 @@ impl SkillsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillEntry {
     pub source_url: String,
+    pub slug: String,
+    pub sha: String,
+    pub path: String,
     pub checksum: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct GitHubUrlSpec {
-    pub owner: String,
-    pub repo: String,
+    pub slug: String,
     pub tail: Vec<String>,
 }
 
@@ -53,7 +55,7 @@ impl GitHubUrlSpec {
     pub fn parse(url: &str) -> SkillsResult<Self> {
         static RE: OnceLock<Regex> = OnceLock::new();
         let re = RE.get_or_init(|| {
-            Regex::new(r"^https://github\.com/([^/]+)/([^/]+)/tree/(.+?)/?$").unwrap()
+            Regex::new(r"^https://github\.com/([^/]+/[^/]+)/tree/(.+?)/?$").unwrap()
         });
 
         let url = url.trim_end_matches('/');
@@ -61,7 +63,7 @@ impl GitHubUrlSpec {
             .captures(url)
             .ok_or_else(|| SkillsError::InvalidUrl(url.to_string()))?;
 
-        let tail: Vec<String> = captures[3]
+        let tail: Vec<String> = captures[2]
             .split('/')
             .filter(|part| !part.is_empty())
             .map(|part| part.to_string())
@@ -72,8 +74,7 @@ impl GitHubUrlSpec {
         }
 
         Ok(Self {
-            owner: captures[1].to_string(),
-            repo: captures[2].to_string(),
+            slug: captures[1].to_string(),
             tail,
         })
     }
@@ -85,8 +86,7 @@ impl GitHubUrlSpec {
     pub fn candidates(&self) -> Vec<GitHubUrl> {
         (1..self.tail.len())
             .map(|split| GitHubUrl {
-                owner: self.owner.clone(),
-                repo: self.repo.clone(),
+                slug: self.slug.clone(),
                 r#ref: self.tail[..split].join("/"),
                 path: self.tail[split..].join("/"),
             })
@@ -96,8 +96,7 @@ impl GitHubUrlSpec {
 
 #[derive(Debug, Clone)]
 pub struct GitHubUrl {
-    pub owner: String,
-    pub repo: String,
+    pub slug: String,
     pub r#ref: String,
     pub path: String,
 }
@@ -105,8 +104,17 @@ pub struct GitHubUrl {
 impl GitHubUrl {
     pub fn tarball_url(&self) -> String {
         format!(
-            "https://api.github.com/repos/{}/{}/tarball/{}",
-            self.owner, self.repo, self.r#ref
+            "https://api.github.com/repos/{}/tarball/{}",
+            self.slug, self.r#ref
+        )
+    }
+
+    pub fn commits_url(&self) -> String {
+        format!(
+            "https://api.github.com/repos/{}/commits?ref={}&path={}&per_page=1",
+            self.slug,
+            urlencoding::encode(&self.r#ref),
+            urlencoding::encode(&self.path)
         )
     }
 }
@@ -120,8 +128,7 @@ mod tests {
         let url = "https://github.com/anthropics/skills/tree/main/skills/frontend-design";
         let result = GitHubUrlSpec::parse(url).unwrap();
 
-        assert_eq!(result.owner, "anthropics");
-        assert_eq!(result.repo, "skills");
+        assert_eq!(result.slug, "anthropics/skills");
         assert_eq!(result.tail, vec!["main", "skills", "frontend-design"]);
     }
 
@@ -130,8 +137,7 @@ mod tests {
         let url = "https://github.com/owner/repo/tree/00756142ab04c82a447693cf373c4e0c554d1005/path/to/dir";
         let result = GitHubUrlSpec::parse(url).unwrap();
 
-        assert_eq!(result.owner, "owner");
-        assert_eq!(result.repo, "repo");
+        assert_eq!(result.slug, "owner/repo");
         assert_eq!(
             result.tail,
             vec![
@@ -148,8 +154,7 @@ mod tests {
         let url = "https://github.com/owner/repo/tree/main/path/";
         let result = GitHubUrlSpec::parse(url).unwrap();
 
-        assert_eq!(result.owner, "owner");
-        assert_eq!(result.repo, "repo");
+        assert_eq!(result.slug, "owner/repo");
         assert_eq!(result.tail, vec!["main", "path"]);
     }
 
@@ -158,8 +163,7 @@ mod tests {
         let url = "https://github.com/owner/repo/tree/feature/foo/path/to/dir";
         let result = GitHubUrlSpec::parse(url).unwrap();
 
-        assert_eq!(result.owner, "owner");
-        assert_eq!(result.repo, "repo");
+        assert_eq!(result.slug, "owner/repo");
         assert_eq!(result.tail, vec!["feature", "foo", "path", "to", "dir"]);
     }
 
@@ -204,8 +208,7 @@ mod tests {
     #[test]
     fn test_directory_name() {
         let github_url = GitHubUrlSpec {
-            owner: "owner".to_string(),
-            repo: "repo".to_string(),
+            slug: "owner/repo".to_string(),
             tail: vec![
                 "main".to_string(),
                 "skills".to_string(),
@@ -219,8 +222,7 @@ mod tests {
     #[test]
     fn test_directory_name_single_component() {
         let github_url = GitHubUrlSpec {
-            owner: "owner".to_string(),
-            repo: "repo".to_string(),
+            slug: "owner/repo".to_string(),
             tail: vec!["main".to_string(), "skill".to_string()],
         };
 
@@ -230,8 +232,7 @@ mod tests {
     #[test]
     fn test_tarball_url() {
         let github_url = GitHubUrl {
-            owner: "anthropics".to_string(),
-            repo: "skills".to_string(),
+            slug: "anthropics/skills".to_string(),
             r#ref: "main".to_string(),
             path: "skills/frontend-design".to_string(),
         };

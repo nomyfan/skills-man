@@ -107,12 +107,65 @@ fn download_and_extract(github_url: &GitHubUrl, dest_dir: &Path) -> SkillsResult
     Ok(())
 }
 
+/// Resolves a ref to its commit SHA using the GitHub commits API.
+/// Returns Ok(Some(sha)) if the ref exists, Ok(None) if not found.
+fn resolve_ref_to_sha(agent: &ureq::Agent, github_url: &GitHubUrl) -> SkillsResult<Option<String>> {
+    let url = github_url.commits_url();
+    match agent
+        .get(&url)
+        .header("User-Agent", "skills-man")
+        .header("Accept", "application/vnd.github+json")
+        .call()
+    {
+        Ok(response) => {
+            let json: serde_json::Value = response
+                .into_body()
+                .read_json()
+                .map_err(|e| SkillsError::NetworkError(e.to_string()))?;
+            let sha = json
+                .get(0)
+                .and_then(|x| x.get("sha"))
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| SkillsError::NetworkError("Missing sha in response".to_string()))?
+                .to_string();
+            Ok(Some(sha))
+        }
+        Err(ureq::Error::StatusCode(status)) => match status {
+            404 | 422 => Ok(None),
+            403 => Err(SkillsError::Forbidden),
+            429 => Err(SkillsError::RateLimited),
+            _ => Err(SkillsError::HttpError {
+                status,
+                message: url,
+            }),
+        },
+        Err(e) => Err(SkillsError::NetworkError(e.to_string())),
+    }
+}
+
 fn download_with_candidates(spec: &GitHubUrlSpec, dest_dir: &Path) -> SkillsResult<GitHubUrl> {
+    let agent = build_agent()?;
     let mut last_retryable: Option<SkillsError> = None;
 
     for candidate in spec.candidates() {
-        match download_and_extract(&candidate, dest_dir) {
-            Ok(_) => return Ok(candidate),
+        // First resolve the ref to SHA using the commits API
+        let sha = match resolve_ref_to_sha(&agent, &candidate)? {
+            None => {
+                last_retryable = Some(SkillsError::NotFound {
+                    url: candidate.commits_url(),
+                });
+                continue;
+            }
+            Some(sha) => sha,
+        };
+
+        let resolved = GitHubUrl {
+            r#ref: sha,
+            ..candidate
+        };
+
+        match download_and_extract(&resolved, dest_dir) {
+            Ok(_) => return Ok(resolved),
             Err(err) => match err {
                 SkillsError::NotFound { .. } | SkillsError::PathNotFound(_) => {
                     last_retryable = Some(err);
@@ -158,7 +211,7 @@ pub fn install_skill(url: &str, force: bool) -> SkillsResult<()> {
 
     println!("Downloading skill '{}'...", skill_name);
     match download_with_candidates(&spec, &temp_dir) {
-        Ok(_) => {
+        Ok(github_url) => {
             if skill_dir.exists() {
                 fs::remove_dir_all(&skill_dir)?;
             }
@@ -169,6 +222,9 @@ pub fn install_skill(url: &str, force: bool) -> SkillsResult<()> {
 
             let entry = SkillEntry {
                 source_url: url.to_string(),
+                slug: github_url.slug,
+                sha: github_url.r#ref,
+                path: github_url.path,
                 checksum,
             };
 
@@ -413,6 +469,9 @@ mod tests {
             "test-skill".to_string(),
             SkillEntry {
                 source_url: "https://github.com/owner/repo/tree/main/path".to_string(),
+                slug: "owner/repo".to_string(),
+                sha: "main".to_string(),
+                path: "path".to_string(),
                 checksum: "sha256:abc123".to_string(),
             },
         );
