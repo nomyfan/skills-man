@@ -1,0 +1,4 @@
+/target
+.claude/settings.local.json
+skills
+skills.toml
