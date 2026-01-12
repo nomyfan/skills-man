@@ -24,11 +24,7 @@ enum Commands {
         #[arg(short, long)]
         force: bool,
     },
-    Sync {
-        /// Show what would be done without making changes
-        #[arg(short = 'n', long)]
-        dry_run: bool,
-    },
+    Sync,
     Uninstall {
         /// Name of the skill to uninstall
         name: String,
@@ -40,7 +36,7 @@ fn main() {
 
     let result = match cli.command {
         Commands::Install { url, force } => cli::install_skill(&url, force),
-        Commands::Sync { dry_run } => cli::sync_skills(dry_run),
+        Commands::Sync => cli::sync_skills(),
         Commands::Uninstall { name } => cli::uninstall_skill(&name),
     };
 

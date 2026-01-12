@@ -185,7 +185,7 @@ pub fn install_skill(url: &str, force: bool) -> SkillsResult<()> {
     }
 }
 
-pub fn sync_skills(dry_run: bool) -> SkillsResult<()> {
+pub fn sync_skills() -> SkillsResult<()> {
     let config_path = Path::new("skills.toml");
     let mut config = SkillsConfig::from_file(config_path)?;
 
@@ -209,11 +209,7 @@ pub fn sync_skills(dry_run: bool) -> SkillsResult<()> {
             }
 
             if !configured.contains(name) {
-                if dry_run {
-                    println!("[{}] Would remove (not in skills.toml)", name);
-                } else {
-                    fs::remove_dir_all(&path)?;
-                }
+                fs::remove_dir_all(&path)?;
             }
         }
     }
@@ -244,18 +240,14 @@ pub fn sync_skills(dry_run: bool) -> SkillsResult<()> {
                         name
                     );
 
-                    if dry_run {
-                        true
-                    } else {
-                        print!("Overwrite local changes? (y/N): ");
-                        io::stdout().flush().ok();
+                    print!("Overwrite local changes? (y/N): ");
+                    io::stdout().flush().ok();
 
-                        let mut input = String::new();
-                        io::stdin().read_line(&mut input).ok();
-                        let answer = input.trim().to_lowercase();
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input).ok();
+                    let answer = input.trim().to_lowercase();
 
-                        answer == "y" || answer == "yes"
-                    }
+                    answer == "y" || answer == "yes"
                 }
                 Err(e) => {
                     eprintln!("[{}] Error calculating checksum: {}", name, e);
@@ -265,64 +257,58 @@ pub fn sync_skills(dry_run: bool) -> SkillsResult<()> {
         };
 
         if needs_download {
-            if dry_run {
-                println!("[{}] Would download", name);
-            } else {
-                let spec = match GitHubUrlSpec::parse(&entry.source_url) {
-                    Ok(url) => url,
-                    Err(e) => {
-                        eprintln!("[{}] Invalid URL: {}", name, e);
-                        continue;
-                    }
-                };
-
-                let temp_dir = skills_dir.join(format!(".{}.tmp", name));
-                if temp_dir.exists() {
-                    fs::remove_dir_all(&temp_dir).ok();
-                }
-                if let Err(e) = fs::create_dir_all(&temp_dir) {
-                    eprintln!("[{}] Failed to create temp directory: {}", name, e);
+            let spec = match GitHubUrlSpec::parse(&entry.source_url) {
+                Ok(url) => url,
+                Err(e) => {
+                    eprintln!("[{}] Invalid URL: {}", name, e);
                     continue;
                 }
+            };
 
-                match download_with_candidates(&spec, &temp_dir) {
-                    Ok(_) => {
-                        if skill_dir.exists() {
-                            fs::remove_dir_all(&skill_dir).ok();
-                        }
-                        match fs::rename(&temp_dir, &skill_dir) {
-                            Ok(_) => match calculate_checksum(&skill_dir) {
-                                Ok(checksum) => {
-                                    if let Some(entry) = config.skills.get_mut(&name) {
-                                        entry.checksum = checksum;
-                                    }
-                                    println!("[{}] Downloaded successfully", name);
+            let temp_dir = skills_dir.join(format!(".{}.tmp", name));
+            if temp_dir.exists() {
+                fs::remove_dir_all(&temp_dir).ok();
+            }
+            if let Err(e) = fs::create_dir_all(&temp_dir) {
+                eprintln!("[{}] Failed to create temp directory: {}", name, e);
+                continue;
+            }
+
+            match download_with_candidates(&spec, &temp_dir) {
+                Ok(_) => {
+                    if skill_dir.exists() {
+                        fs::remove_dir_all(&skill_dir).ok();
+                    }
+                    match fs::rename(&temp_dir, &skill_dir) {
+                        Ok(_) => match calculate_checksum(&skill_dir) {
+                            Ok(checksum) => {
+                                if let Some(entry) = config.skills.get_mut(&name) {
+                                    entry.checksum = checksum;
                                 }
-                                Err(e) => {
-                                    eprintln!(
-                                        "[{}] Downloaded but failed to calculate checksum: {}",
-                                        name, e
-                                    );
-                                }
-                            },
-                            Err(e) => {
-                                eprintln!("[{}] Failed to move to final location: {}", name, e);
-                                fs::remove_dir_all(&temp_dir).ok();
+                                println!("[{}] Downloaded successfully", name);
                             }
+                            Err(e) => {
+                                eprintln!(
+                                    "[{}] Downloaded but failed to calculate checksum: {}",
+                                    name, e
+                                );
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("[{}] Failed to move to final location: {}", name, e);
+                            fs::remove_dir_all(&temp_dir).ok();
                         }
                     }
-                    Err(e) => {
-                        eprintln!("[{}] Download failed: {}", name, e);
-                        fs::remove_dir_all(&temp_dir).ok();
-                    }
+                }
+                Err(e) => {
+                    eprintln!("[{}] Download failed: {}", name, e);
+                    fs::remove_dir_all(&temp_dir).ok();
                 }
             }
         }
     }
 
-    if !dry_run {
-        config.save(config_path)?;
-    }
+    config.save(config_path)?;
 
     Ok(())
 }
