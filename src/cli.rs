@@ -180,7 +180,7 @@ fn download_with_candidates(spec: &GitHubUrlSpec, dest_dir: &Path) -> SkillsResu
     }))
 }
 
-pub fn install_skill(url: &str, force: bool) -> SkillsResult<()> {
+pub fn install_skill(url: &str) -> SkillsResult<()> {
     let spec = GitHubUrlSpec::parse(url)?;
 
     let skill_name = spec.directory_name();
@@ -190,17 +190,47 @@ pub fn install_skill(url: &str, force: bool) -> SkillsResult<()> {
 
     let mut config = SkillsConfig::from_file(config_path)?;
 
-    if !force
-        && let Some(existing) = config.skills.get(skill_name)
+    if let Some(existing) = config.skills.get(skill_name)
         && skill_dir.exists()
         && let Ok(checksum) = calculate_checksum(&skill_dir)
         && checksum == existing.checksum
     {
-        println!(
-            "Skill '{}' is already installed and up to date.",
-            skill_name
-        );
-        return Ok(());
+        let match_upstream_sha = |agent| {
+            for candidate in spec.candidates() {
+                if let Ok(Some(current_sha)) = resolve_ref_to_sha(&agent, &candidate) {
+                    return Some(current_sha == existing.sha);
+                }
+            }
+            // Unable to resolve SHA (network error or 404)
+            None
+        };
+
+        match match_upstream_sha(build_agent()?) {
+            Some(true) => {
+                // Upstream SHA matches - truly up to date
+                println!(
+                    "Skill '{}' is already installed and up to date.",
+                    skill_name
+                );
+                return Ok(());
+            }
+            Some(false) => {
+                // Upstream has moved to new SHA - proceed with installation
+                println!(
+                    "Upstream ref has moved to new commit, updating skill '{}'...",
+                    skill_name
+                );
+                // Fall through to installation
+            }
+            None => {
+                // SHA resolution failed (network error) - assume up to date
+                println!(
+                    "Skill '{}' is already installed (checksum matches, unable to verify upstream).",
+                    skill_name
+                );
+                return Ok(());
+            }
+        }
     }
 
     let temp_dir = skills_dir.join(format!(".{}.tmp", skill_name));

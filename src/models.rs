@@ -40,8 +40,8 @@ impl SkillsConfig {
 pub struct SkillEntry {
     pub source_url: String,
     pub slug: String,
-    pub sha: String,
     pub path: String,
+    pub sha: String,
     pub checksum: String,
 }
 

@@ -19,10 +19,6 @@ enum Commands {
     Install {
         /// GitHub URL of the skill to install
         url: String,
-
-        /// Force reinstall even if already installed
-        #[arg(short, long)]
-        force: bool,
     },
     Sync,
     Uninstall {
@@ -35,7 +31,7 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Install { url, force } => cli::install_skill(&url, force),
+        Commands::Install { url } => cli::install_skill(&url),
         Commands::Sync => cli::sync_skills(),
         Commands::Uninstall { name } => cli::uninstall_skill(&name),
     };
