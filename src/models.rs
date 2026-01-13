@@ -271,7 +271,10 @@ mod tests {
 
         let result = SkillsConfig::from_file(&config_path);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SkillsError::ConfigParseError(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            SkillsError::ConfigParseError(_)
+        ));
 
         fs::remove_dir_all(&temp_dir).unwrap();
     }
