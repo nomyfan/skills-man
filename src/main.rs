@@ -21,11 +21,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(alias = "i")]
     Install {
         /// GitHub URL of the skill to install
         url: String,
     },
     Sync,
+    #[command(alias = "up")]
+    /// Check upstream and update a single skill
+    Update {
+        /// Name of the skill to update
+        name: String,
+    },
     Uninstall {
         /// Name of the skill to uninstall
         name: String,
@@ -59,6 +66,7 @@ fn main() {
     let result = match cli.command {
         Commands::Install { url } => cli::install_skill(&url, &base_dir),
         Commands::Sync => cli::sync_skills(&base_dir),
+        Commands::Update { name } => cli::update_skill(&name, &base_dir),
         Commands::Uninstall { name } => cli::uninstall_skill(&name, &base_dir),
         Commands::List => cli::list_skills(&base_dir),
     };
