@@ -1,5 +1,6 @@
 use std::{fs, io, path::Path};
 
+use crate::errors::{SkillsError, SkillsResult};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
@@ -23,6 +24,25 @@ pub fn calculate_checksum(dir: &Path) -> Result<String, io::Error> {
     }
 
     Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
+pub fn ensure_skill_manifest(dir: &Path) -> SkillsResult<()> {
+    let entries = fs::read_dir(dir)?;
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.to_ascii_lowercase() == "skill.md" {
+            return Ok(());
+        }
+    }
+
+    Err(SkillsError::MissingSkillManifest)
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use crate::{
     errors::SkillsResult,
     models::{GitHubUrlSpec, SkillEntry, SkillsConfig},
-    utils::calculate_checksum,
+    utils::{calculate_checksum, ensure_skill_manifest},
 };
 use std::{fs, path::Path};
 
@@ -64,6 +64,11 @@ pub fn install_skill(url: &str, base_dir: &Path) -> SkillsResult<()> {
     println!("Downloading skill '{}'...", skill_name);
     match download_with_candidates(&spec, &temp_dir) {
         Ok(github_url) => {
+            if let Err(e) = ensure_skill_manifest(&temp_dir) {
+                fs::remove_dir_all(&temp_dir).ok();
+                return Err(e);
+            }
+
             if skill_dir.exists() {
                 fs::remove_dir_all(&skill_dir)?;
             }

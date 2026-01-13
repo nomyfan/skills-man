@@ -39,6 +39,9 @@ pub enum SkillsError {
     )]
     PathNotFound(String),
 
+    #[error("Invalid skill, expect 'SKILL.md' or 'skill.md' in the directory.")]
+    MissingSkillManifest,
+
     #[error("Filesystem error\n\n{0}")]
     IoError(#[from] io::Error),
 

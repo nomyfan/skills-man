@@ -1,7 +1,7 @@
 use crate::{
     errors::SkillsResult,
     models::{GitHubUrlSpec, SkillsConfig},
-    utils::calculate_checksum,
+    utils::{calculate_checksum, ensure_skill_manifest},
 };
 use std::{collections::HashSet, fs, io, io::Write as IoWrite, path::Path};
 
@@ -98,6 +98,12 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
 
             match download_with_candidates(&spec, &temp_dir) {
                 Ok(_) => {
+                    if let Err(e) = ensure_skill_manifest(&temp_dir) {
+                        eprintln!("[{}] Downloaded but invalid skill: {}", name, e);
+                        fs::remove_dir_all(&temp_dir).ok();
+                        continue;
+                    }
+
                     if skill_dir.exists() {
                         fs::remove_dir_all(&skill_dir).ok();
                     }
