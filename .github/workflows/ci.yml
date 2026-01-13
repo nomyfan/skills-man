@@ -41,6 +41,11 @@ jobs:
           targets: ${{ matrix.targets }}
           components: clippy
 
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
+
       - name: Test
         run: cargo test
 
