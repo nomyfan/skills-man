@@ -24,3 +24,31 @@ pub fn calculate_checksum(dir: &Path) -> Result<String, io::Error> {
 
     Ok(format!("sha256:{:x}", hasher.finalize()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_calculate_checksum() {
+        let temp_dir = std::env::temp_dir().join("skills_test_checksum");
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        fs::write(temp_dir.join("file1.txt"), b"content1").unwrap();
+        fs::write(temp_dir.join("file2.txt"), b"content2").unwrap();
+
+        let checksum1 = calculate_checksum(&temp_dir).unwrap();
+
+        let checksum2 = calculate_checksum(&temp_dir).unwrap();
+        assert_eq!(checksum1, checksum2);
+
+        assert!(checksum1.starts_with("sha256:"));
+
+        fs::write(temp_dir.join("file1.txt"), b"modified").unwrap();
+        let checksum3 = calculate_checksum(&temp_dir).unwrap();
+        assert_ne!(checksum1, checksum3);
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+}

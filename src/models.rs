@@ -122,6 +122,7 @@ impl GitHubUrl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{fs, path::Path};
 
     #[test]
     fn test_parse_valid_url_basic() {
@@ -241,5 +242,71 @@ mod tests {
             github_url.tarball_url(),
             "https://api.github.com/repos/anthropics/skills/tarball/main"
         );
+    }
+
+    #[test]
+    fn test_load_config_empty_or_missing() {
+        let config = SkillsConfig::from_file(Path::new("/nonexistent/skills.toml")).unwrap();
+        assert!(config.skills.is_empty());
+
+        let temp_dir = std::env::temp_dir().join("skills_test_empty_config");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let config_path = temp_dir.join("skills.toml");
+
+        fs::write(&config_path, "").unwrap();
+
+        let config = SkillsConfig::from_file(&config_path).unwrap();
+        assert!(config.skills.is_empty());
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_load_config_malformed() {
+        let temp_dir = std::env::temp_dir().join("skills_test_malformed");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let config_path = temp_dir.join("skills.toml");
+
+        fs::write(&config_path, "invalid toml content [[[").unwrap();
+
+        let result = SkillsConfig::from_file(&config_path);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SkillsError::ConfigParseError(_)));
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn test_save_and_load_config() {
+        let temp_dir = std::env::temp_dir().join("skills_test_config");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let config_path = temp_dir.join("skills.toml");
+
+        let mut config = SkillsConfig::default();
+        config.skills.insert(
+            "test-skill".to_string(),
+            SkillEntry {
+                source_url: "https://github.com/owner/repo/tree/main/path".to_string(),
+                slug: "owner/repo".to_string(),
+                sha: "main".to_string(),
+                path: "path".to_string(),
+                checksum: "sha256:abc123".to_string(),
+            },
+        );
+
+        config.save(&config_path).unwrap();
+
+        let loaded_config = SkillsConfig::from_file(&config_path).unwrap();
+        assert_eq!(loaded_config.skills.len(), 1);
+        assert!(loaded_config.skills.contains_key("test-skill"));
+
+        let entry = &loaded_config.skills["test-skill"];
+        assert_eq!(
+            entry.source_url,
+            "https://github.com/owner/repo/tree/main/path"
+        );
+        assert_eq!(entry.checksum, "sha256:abc123");
+
+        fs::remove_dir_all(&temp_dir).unwrap();
     }
 }
