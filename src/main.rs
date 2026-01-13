@@ -30,6 +30,8 @@ enum Commands {
         /// Name of the skill to uninstall
         name: String,
     },
+    /// List all installed skills
+    List,
 }
 
 fn get_base_dir(global: bool) -> Result<PathBuf, String> {
@@ -58,6 +60,7 @@ fn main() {
         Commands::Install { url } => cli::install_skill(&url, &base_dir),
         Commands::Sync => cli::sync_skills(&base_dir),
         Commands::Uninstall { name } => cli::uninstall_skill(&name, &base_dir),
+        Commands::List => cli::list_skills(&base_dir),
     };
 
     if let Err(e) = result {
