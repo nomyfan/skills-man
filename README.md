@@ -21,6 +21,11 @@ Install the binary directly from Git:
 cargo install --git https://github.com/nomyfan/skills-man
 ```
 
+If you prefer a prebuilt binary, download it from GitHub [Releases](https://github.com/nomyfan/skills-man/releases)
+
+After downloading, extract it and place `skill` in a directory on your `PATH`
+(for example, `/usr/local/bin`).
+
 Run the CLI:
 
 ```bash
