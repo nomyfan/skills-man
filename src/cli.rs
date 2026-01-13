@@ -180,15 +180,15 @@ fn download_with_candidates(spec: &GitHubUrlSpec, dest_dir: &Path) -> SkillsResu
     }))
 }
 
-pub fn install_skill(url: &str) -> SkillsResult<()> {
+pub fn install_skill(url: &str, base_dir: &Path) -> SkillsResult<()> {
     let spec = GitHubUrlSpec::parse(url)?;
 
     let skill_name = spec.directory_name();
-    let skills_dir = Path::new("./skills");
+    let skills_dir = base_dir.join("skills");
     let skill_dir = skills_dir.join(skill_name);
-    let config_path = Path::new("skills.toml");
+    let config_path = base_dir.join("skills.toml");
 
-    let mut config = SkillsConfig::from_file(config_path)?;
+    let mut config = SkillsConfig::from_file(&config_path)?;
 
     if let Some(existing) = config.skills.get(skill_name)
         && skill_dir.exists()
@@ -259,7 +259,7 @@ pub fn install_skill(url: &str) -> SkillsResult<()> {
             };
 
             config.skills.insert(skill_name.to_string(), entry);
-            config.save(config_path)?;
+            config.save(&config_path)?;
 
             println!("Successfully installed skill '{}'.", skill_name);
             Ok(())
@@ -271,15 +271,15 @@ pub fn install_skill(url: &str) -> SkillsResult<()> {
     }
 }
 
-pub fn sync_skills() -> SkillsResult<()> {
-    let config_path = Path::new("skills.toml");
-    let mut config = SkillsConfig::from_file(config_path)?;
+pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
+    let config_path = base_dir.join("skills.toml");
+    let mut config = SkillsConfig::from_file(&config_path)?;
 
-    let skills_dir = Path::new("./skills");
+    let skills_dir = base_dir.join("skills");
     let configured: HashSet<String> = config.skills.keys().cloned().collect();
 
     if skills_dir.exists() {
-        for entry in fs::read_dir(skills_dir)? {
+        for entry in fs::read_dir(&skills_dir)? {
             let entry = entry?;
             let path = entry.path();
             if !path.is_dir() {
@@ -394,16 +394,16 @@ pub fn sync_skills() -> SkillsResult<()> {
         }
     }
 
-    config.save(config_path)?;
+    config.save(&config_path)?;
 
     Ok(())
 }
 
-pub fn uninstall_skill(name: &str) -> SkillsResult<()> {
-    let config_path = Path::new("skills.toml");
-    let mut config = SkillsConfig::from_file(config_path)?;
+pub fn uninstall_skill(name: &str, base_dir: &Path) -> SkillsResult<()> {
+    let config_path = base_dir.join("skills.toml");
+    let mut config = SkillsConfig::from_file(&config_path)?;
 
-    let skills_dir = Path::new("./skills");
+    let skills_dir = base_dir.join("skills");
     let skill_dir = skills_dir.join(name);
 
     let mut removed_any = false;
@@ -414,7 +414,7 @@ pub fn uninstall_skill(name: &str) -> SkillsResult<()> {
 
     if config.skills.remove(name).is_some() {
         removed_any = true;
-        config.save(config_path)?;
+        config.save(&config_path)?;
     }
 
     if removed_any {
