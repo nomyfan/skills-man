@@ -6,25 +6,23 @@ them in `skills.toml` so you can keep installs clean and up to date.
 
 ## Features
 
-- Install skills from GitHub URLs.
+- Install skills from GitHub URLs(currently only GitHub URLs are supported).
 - Sync local skills with upstream changes.
-- Detect local modifications via directory checksums.
-- List and uninstall skills.
-- Update a single skill.
+- List, update and uninstall skills.
 - Local and global modes.
 
 ## Quick start
 
-Install the binary directly from Git:
+Download a prebuilt binary from GitHub [Releases](https://github.com/nomyfan/skills-man/releases)
+
+After downloading, extract it and place `skill` in a directory on your `PATH`
+(for example, `/usr/local/bin`).
+
+Or build and install from source:
 
 ```bash
 cargo install --git https://github.com/nomyfan/skills-man
 ```
-
-If you prefer a prebuilt binary, download it from GitHub [Releases](https://github.com/nomyfan/skills-man/releases)
-
-After downloading, extract it and place `skill` in a directory on your `PATH`
-(for example, `/usr/local/bin`).
 
 Run the CLI:
 
@@ -34,13 +32,6 @@ skill list
 skill sync
 skill update skill-name
 skill uninstall skill-name
-```
-
-Or build and run locally:
-
-```bash
-cargo build
-cargo run -- install https://github.com/owner/repo/tree/main/path/to/skill
 ```
 
 ## Commands
@@ -104,7 +95,7 @@ You can share `~/.skills-man/skills.toml` with teammates, run `skill -g sync`, a
 
 ## GitHub URL format
 
-Skills must be referenced with the GitHub "tree" URL that points at a directory(currently only GitHub URLs are supported):
+Skills must be referenced with the GitHub "tree" URL that points at a directory:
 
 ```
 https://github.com/<owner>/<repo>/tree/<ref>/<path>
