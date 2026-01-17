@@ -1,11 +1,11 @@
 use crate::{
     errors::SkillsResult,
-    models::{GitHubUrlSpec, SkillsConfig},
+    models::{GitHubUrl, SkillsConfig},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
 use std::{fs, io, io::Write as IoWrite, path::Path};
 
-use super::github::download_with_candidates;
+use super::github::download_and_extract;
 
 pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
     let config_path = base_dir.join("skills.toml");
@@ -74,12 +74,10 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
         };
 
         if needs_download {
-            let spec = match GitHubUrlSpec::parse(&entry.source_url) {
-                Ok(url) => url,
-                Err(e) => {
-                    eprintln!("[{}] Invalid URL: {}", name, e);
-                    continue;
-                }
+            let github_url = GitHubUrl {
+                slug: entry.slug.clone(),
+                r#ref: entry.sha.clone(),
+                path: entry.path.clone(),
             };
 
             let temp_dir = skills_dir.join(format!(".{}.tmp", name));
@@ -91,7 +89,7 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
                 continue;
             }
 
-            match download_with_candidates(&spec, &temp_dir) {
+            match download_and_extract(&github_url, &temp_dir) {
                 Ok(_) => {
                     if let Err(e) = ensure_skill_manifest(&temp_dir) {
                         eprintln!("[{}] Downloaded but invalid skill: {}", name, e);

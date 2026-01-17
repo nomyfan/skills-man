@@ -37,7 +37,7 @@ pub(super) fn build_agent() -> SkillsResult<ureq::Agent> {
     }
 }
 
-fn download_and_extract(github_url: &GitHubUrl, dest_dir: &Path) -> SkillsResult<()> {
+pub(super) fn download_and_extract(github_url: &GitHubUrl, dest_dir: &Path) -> SkillsResult<()> {
     let agent = build_agent()?;
     let url = github_url.tarball_url();
     let response = match agent
