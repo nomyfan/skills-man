@@ -3,11 +3,39 @@ use crate::{
     models::{GitHubUrlSpec, SkillEntry, SkillsConfig},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
-use std::{fs, path::Path};
+use std::{
+    fs, io,
+    io::{IsTerminal, Write as IoWrite},
+    path::Path,
+};
 
 use super::github::{build_agent, download_with_candidates, resolve_ref_to_sha};
 
-pub fn install_skill(url: &str, base_dir: &Path) -> SkillsResult<()> {
+/// Prompt user for confirmation
+/// Returns true if yes flag is set, or if user confirms in interactive mode
+/// Returns false if stdin is not a TTY (non-interactive context)
+fn confirm_action(prompt: &str, yes: bool) -> bool {
+    if yes {
+        return true;
+    }
+
+    if !io::stdin().is_terminal() {
+        eprintln!("Non-interactive mode detected. Use --yes flag to auto-confirm.");
+        return false;
+    }
+
+    print!("{} (y/N): ", prompt);
+    io::stdout().flush().ok();
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).ok();
+    let answer = input.trim().to_lowercase();
+
+    answer == "y" || answer == "yes"
+}
+
+pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> {
+    let url = url.trim_end_matches('/');
     let spec = GitHubUrlSpec::parse(url)?;
 
     let skill_name = spec.directory_name();
@@ -16,6 +44,23 @@ pub fn install_skill(url: &str, base_dir: &Path) -> SkillsResult<()> {
     let config_path = base_dir.join("skills.toml");
 
     let mut config = SkillsConfig::from_file(&config_path)?;
+
+    // Check if a skill with the same name but different source URL already exists
+    if let Some(existing) = config.skills.get(skill_name)
+        && existing.source_url != url
+    {
+        println!(
+            "Skill '{}' is already installed from a different source:",
+            skill_name
+        );
+        println!("  Current: {}", existing.source_url);
+        println!("  New:     {}", url);
+
+        if !confirm_action("Continue to install with new source?", yes) {
+            println!("Installation cancelled.");
+            return Ok(());
+        }
+    }
 
     if let Some(existing) = config.skills.get(skill_name)
         && skill_dir.exists()
@@ -33,6 +78,13 @@ pub fn install_skill(url: &str, base_dir: &Path) -> SkillsResult<()> {
 
         match match_upstream_sha(build_agent()?) {
             Some(true) => {
+                // Check if source_url needs update even when sha is the same
+                if existing.source_url != url {
+                    if let Some(entry) = config.skills.get_mut(skill_name) {
+                        entry.source_url = url.to_string();
+                    }
+                    config.save(&config_path)?;
+                }
                 println!(
                     "Skill '{}' is already installed and up to date.",
                     skill_name

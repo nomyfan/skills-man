@@ -25,6 +25,9 @@ enum Commands {
     Install {
         /// GitHub URL of the skill to install
         url: String,
+        /// Automatically answer yes to prompts (non-interactive mode)
+        #[arg(short, long)]
+        yes: bool,
     },
     Sync,
     #[command(alias = "up")]
@@ -32,6 +35,9 @@ enum Commands {
     Update {
         /// Name of the skill to update
         name: String,
+        /// Automatically answer yes to prompts (non-interactive mode)
+        #[arg(short, long)]
+        yes: bool,
     },
     Uninstall {
         /// Name of the skill to uninstall
@@ -64,9 +70,9 @@ fn main() {
     };
 
     let result = match cli.command {
-        Commands::Install { url } => cli::install_skill(&url, &base_dir),
+        Commands::Install { url, yes } => cli::install_skill(&url, &base_dir, yes),
         Commands::Sync => cli::sync_skills(&base_dir),
-        Commands::Update { name } => cli::update_skill(&name, &base_dir),
+        Commands::Update { name, yes } => cli::update_skill(&name, &base_dir, yes),
         Commands::Uninstall { name } => cli::uninstall_skill(&name, &base_dir),
         Commands::List => cli::list_skills(&base_dir),
     };
