@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "skills-man")]
-#[command(version)]
+#[command(version("0.1.1"))]
 #[command(about = "Manage Agents skills")]
 struct Cli {
     /// Use global directory (~/.skills-man)
