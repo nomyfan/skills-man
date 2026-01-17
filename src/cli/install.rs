@@ -1,5 +1,6 @@
 use crate::{
-    errors::SkillsResult,
+    cli::github::{download_and_extract, resolve},
+    errors::{SkillsError, SkillsResult},
     models::{GitHubUrlSpec, SkillEntry, SkillsConfig},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
@@ -8,8 +9,6 @@ use std::{
     io::{IsTerminal, Write as IoWrite},
     path::Path,
 };
-
-use super::github::{build_agent, download_with_candidates, resolve_ref_to_sha};
 
 /// Prompt user for confirmation
 /// Returns true if yes flag is set, or if user confirms in interactive mode
@@ -62,48 +61,32 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
         }
     }
 
+    let Some(resolved) = resolve(&spec)? else {
+        return Err(SkillsError::PathNotFound(url.to_string()));
+    };
+
     if let Some(existing) = config.skills.get(skill_name)
         && skill_dir.exists()
         && let Ok(checksum) = calculate_checksum(&skill_dir)
         && checksum == existing.checksum
     {
-        let match_upstream_sha = |agent| {
-            for candidate in spec.candidates() {
-                if let Ok(Some(current_sha)) = resolve_ref_to_sha(&agent, &candidate) {
-                    return Some(current_sha == existing.sha);
+        if resolved.r#ref == existing.sha {
+            if existing.source_url != url {
+                if let Some(entry) = config.skills.get_mut(skill_name) {
+                    entry.source_url = url.to_string();
                 }
+                config.save(&config_path)?;
             }
-            None
-        };
-
-        match match_upstream_sha(build_agent()?) {
-            Some(true) => {
-                // Check if source_url needs update even when sha is the same
-                if existing.source_url != url {
-                    if let Some(entry) = config.skills.get_mut(skill_name) {
-                        entry.source_url = url.to_string();
-                    }
-                    config.save(&config_path)?;
-                }
-                println!(
-                    "Skill '{}' is already installed and up to date.",
-                    skill_name
-                );
-                return Ok(());
-            }
-            Some(false) => {
-                println!(
-                    "Upstream ref has moved to new commit, updating skill '{}'...",
-                    skill_name
-                );
-            }
-            None => {
-                println!(
-                    "Skill '{}' is already installed (checksum matches, unable to verify upstream).",
-                    skill_name
-                );
-                return Ok(());
-            }
+            println!(
+                "Skill '{}' is already installed and up to date.",
+                skill_name
+            );
+            return Ok(());
+        } else {
+            println!(
+                "Skill '{}' is already installed. Upstream ref has moved to new commit, updating...",
+                skill_name
+            );
         }
     }
 
@@ -114,8 +97,8 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
     fs::create_dir_all(&temp_dir)?;
 
     println!("Downloading skill '{}'...", skill_name);
-    match download_with_candidates(&spec, &temp_dir) {
-        Ok(github_url) => {
+    match download_and_extract(&resolved, &temp_dir) {
+        Ok(_) => {
             if let Err(e) = ensure_skill_manifest(&temp_dir) {
                 fs::remove_dir_all(&temp_dir).ok();
                 return Err(e);
@@ -131,9 +114,9 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
 
             let entry = SkillEntry {
                 source_url: url.to_string(),
-                slug: github_url.slug,
-                sha: github_url.r#ref,
-                path: github_url.path,
+                slug: resolved.slug,
+                sha: resolved.r#ref,
+                path: resolved.path,
                 checksum,
             };
 

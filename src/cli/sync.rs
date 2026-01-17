@@ -43,7 +43,7 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
         let skill_dir = skills_dir.join(&name);
 
         let needs_download = if !skill_dir.exists() {
-            println!("[{}] Needs download", name);
+            println!("[{}] Downloading...", name);
             true
         } else {
             match calculate_checksum(&skill_dir) {

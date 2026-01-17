@@ -106,9 +106,10 @@ pub(super) fn download_and_extract(github_url: &GitHubUrl, dest_dir: &Path) -> S
     Ok(())
 }
 
-/// Resolves a ref to its commit SHA using the GitHub commits API.
-/// Returns Ok(Some(sha)) if the ref exists, Ok(None) if not found.
-pub(super) fn resolve_ref_to_sha(
+/// Validates that the ref and path exist on GitHub and resolves to a commit SHA.
+/// Uses the GitHub commits API with both ref and path parameters.
+/// Returns Ok(Some(sha)) if both ref and path are valid, Ok(None) if not found.
+pub(super) fn resolve_to_sha(
     agent: &ureq::Agent,
     github_url: &GitHubUrl,
 ) -> SkillsResult<Option<String>> {
@@ -145,41 +146,16 @@ pub(super) fn resolve_ref_to_sha(
     }
 }
 
-pub(super) fn download_with_candidates(
-    spec: &GitHubUrlSpec,
-    dest_dir: &Path,
-) -> SkillsResult<GitHubUrl> {
+pub(crate) fn resolve(spec: &GitHubUrlSpec) -> SkillsResult<Option<GitHubUrl>> {
     let agent = build_agent()?;
-    let mut last_retryable: Option<SkillsError> = None;
-
     for candidate in spec.candidates() {
-        let sha = match resolve_ref_to_sha(&agent, &candidate)? {
-            None => {
-                last_retryable = Some(SkillsError::NotFound {
-                    url: candidate.commits_url(),
-                });
-                continue;
-            }
-            Some(sha) => sha,
-        };
-
-        let resolved = GitHubUrl {
-            r#ref: sha,
-            ..candidate
-        };
-
-        match download_and_extract(&resolved, dest_dir) {
-            Ok(_) => return Ok(resolved),
-            Err(err) => match err {
-                SkillsError::NotFound { .. } | SkillsError::PathNotFound(_) => {
-                    last_retryable = Some(err);
-                }
-                _ => return Err(err),
-            },
+        let sha = resolve_to_sha(&agent, &candidate)?;
+        if let Some(sha) = sha {
+            return Ok(Some(GitHubUrl {
+                r#ref: sha,
+                ..candidate
+            }));
         }
     }
-
-    Err(last_retryable.unwrap_or_else(|| {
-        SkillsError::InvalidUrl("No valid ref/path candidates found".to_string())
-    }))
+    Ok(None)
 }
