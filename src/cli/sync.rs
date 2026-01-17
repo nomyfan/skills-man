@@ -3,7 +3,7 @@ use crate::{
     models::{GitHubUrlSpec, SkillsConfig},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
-use std::{collections::HashSet, fs, io, io::Write as IoWrite, path::Path};
+use std::{fs, io, io::Write as IoWrite, path::Path};
 
 use super::github::download_with_candidates;
 
@@ -12,7 +12,6 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
     let mut config = SkillsConfig::from_file(&config_path)?;
 
     let skills_dir = base_dir.join("skills");
-    let configured: HashSet<String> = config.skills.keys().cloned().collect();
 
     if skills_dir.exists() {
         for entry in fs::read_dir(&skills_dir)? {
@@ -28,10 +27,6 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
 
             if name.starts_with('.') {
                 continue;
-            }
-
-            if !configured.contains(name) {
-                fs::remove_dir_all(&path)?;
             }
         }
     }
