@@ -3,6 +3,7 @@ use crate::{
     models::{GitHubUrl, GitHubUrlSpec},
 };
 use flate2::read::GzDecoder;
+use serde::Deserialize;
 use std::{env, fs, path::Path};
 use tar::Archive;
 use ureq::config::Config;
@@ -50,7 +51,7 @@ pub(super) fn download_and_extract(github_url: &GitHubUrl, dest_dir: &Path) -> S
         Err(ureq::Error::StatusCode(status)) => {
             return Err(match status {
                 404 => SkillsError::NotFound { url },
-                403 => SkillsError::Forbidden,
+                403 => SkillsError::Forbidden { url },
                 429 => SkillsError::RateLimited,
                 _ => SkillsError::HttpError {
                     status,
@@ -135,7 +136,7 @@ pub(super) fn resolve_to_sha(
         }
         Err(ureq::Error::StatusCode(status)) => match status {
             404 | 422 => Ok(None),
-            403 => Err(SkillsError::Forbidden),
+            403 => Err(SkillsError::Forbidden { url }),
             429 => Err(SkillsError::RateLimited),
             _ => Err(SkillsError::HttpError {
                 status,
@@ -146,10 +147,12 @@ pub(super) fn resolve_to_sha(
     }
 }
 
-pub(crate) fn resolve(spec: &GitHubUrlSpec) -> SkillsResult<Option<GitHubUrl>> {
-    let agent = build_agent()?;
+pub(crate) fn resolve(
+    agent: &ureq::Agent,
+    spec: &GitHubUrlSpec,
+) -> SkillsResult<Option<GitHubUrl>> {
     for candidate in spec.candidates() {
-        let sha = resolve_to_sha(&agent, &candidate)?;
+        let sha = resolve_to_sha(agent, &candidate)?;
         if let Some(sha) = sha {
             return Ok(Some(GitHubUrl {
                 r#ref: sha,
@@ -158,4 +161,101 @@ pub(crate) fn resolve(spec: &GitHubUrlSpec) -> SkillsResult<Option<GitHubUrl>> {
         }
     }
     Ok(None)
+}
+
+#[derive(Debug)]
+pub enum SkillDetectionResult {
+    Single,             // Path is a single skill
+    Batch(Vec<String>), // Path contains multiple sub-skills (directory names)
+}
+
+#[derive(Debug, Deserialize)]
+struct ContentItem {
+    name: String,
+    #[serde(rename = "type")]
+    item_type: String, // "file" or "dir"
+}
+
+/// Lists directory contents using the GitHub Contents API
+fn list_directory_contents(
+    agent: &ureq::Agent,
+    github_url: &GitHubUrl,
+) -> SkillsResult<Vec<ContentItem>> {
+    let url = format!(
+        "https://api.github.com/repos/{}/contents/{}?ref={}",
+        github_url.slug, github_url.path, github_url.r#ref
+    );
+
+    match agent
+        .get(&url)
+        .header("User-Agent", "skills-man")
+        .header("Accept", "application/vnd.github+json")
+        .call()
+    {
+        Ok(response) => {
+            let items: Vec<ContentItem> = response
+                .into_body()
+                .read_json()
+                .map_err(|e| SkillsError::NetworkError(e.to_string()))?;
+            Ok(items)
+        }
+        Err(ureq::Error::StatusCode(status)) => match status {
+            404 => Err(SkillsError::PathNotFound(github_url.path.clone())),
+            403 => Err(SkillsError::Forbidden { url }),
+            429 => Err(SkillsError::RateLimited),
+            _ => Err(SkillsError::HttpError {
+                status,
+                message: url,
+            }),
+        },
+        Err(e) => Err(SkillsError::NetworkError(e.to_string())),
+    }
+}
+
+/// Detects whether the GitHub path points to a single skill or a batch of skills
+pub(super) fn detect_skill_type(
+    agent: &ureq::Agent,
+    github_url: &GitHubUrl,
+) -> SkillsResult<SkillDetectionResult> {
+    let contents = list_directory_contents(agent, github_url)?;
+
+    // Check if SKILL.md exists in the current directory (case-insensitive)
+    let has_skill_manifest = contents
+        .iter()
+        .any(|item| item.item_type == "file" && (item.name.eq_ignore_ascii_case("SKILL.md")));
+
+    if has_skill_manifest {
+        return Ok(SkillDetectionResult::Single);
+    }
+
+    // No SKILL.md found, check subdirectories for skills
+    let subdirs: Vec<&ContentItem> = contents
+        .iter()
+        .filter(|item| item.item_type == "dir")
+        .collect();
+
+    let mut skill_dirs = Vec::new();
+
+    for subdir in subdirs {
+        let child_url = GitHubUrl {
+            slug: github_url.slug.clone(),
+            r#ref: github_url.r#ref.clone(),
+            path: format!("{}/{}", github_url.path, subdir.name),
+        };
+
+        let child_contents = list_directory_contents(agent, &child_url)?;
+        let has_skill = child_contents
+            .iter()
+            .any(|item| item.item_type == "file" && (item.name.eq_ignore_ascii_case("SKILL.md")));
+
+        if has_skill {
+            skill_dirs.push(subdir.name.clone());
+        }
+    }
+
+    if skill_dirs.is_empty() {
+        return Err(SkillsError::NoSkillsFound(github_url.path.clone()));
+    }
+
+    Ok(SkillDetectionResult::Batch(skill_dirs))
 }

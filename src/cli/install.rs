@@ -1,7 +1,9 @@
 use crate::{
-    cli::github::{download_and_extract, resolve},
+    cli::github::{
+        SkillDetectionResult, build_agent, detect_skill_type, download_and_extract, resolve,
+    },
     errors::{SkillsError, SkillsResult},
-    models::{GitHubUrlSpec, SkillEntry, SkillsConfig},
+    models::{GitHubUrl, GitHubUrlSpec, SkillEntry, SkillsConfig},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
 use std::{
@@ -37,7 +39,29 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
     let url = url.trim_end_matches('/');
     let spec = GitHubUrlSpec::parse(url)?;
 
-    let skill_name = spec.directory_name();
+    let agent = build_agent()?;
+    let Some(resolved) = resolve(&agent, &spec)? else {
+        return Err(SkillsError::PathNotFound(url.to_string()));
+    };
+
+    match detect_skill_type(&agent, &resolved)? {
+        SkillDetectionResult::Single => {
+            let skill_name = spec.directory_name();
+            install_single_skill(url, resolved, skill_name, base_dir, yes)
+        }
+        SkillDetectionResult::Batch(subdirs) => {
+            install_batch_skills(&agent, url, &subdirs, base_dir, yes)
+        }
+    }
+}
+
+fn install_single_skill(
+    source_url: &str,
+    resolved: GitHubUrl,
+    skill_name: &str,
+    base_dir: &Path,
+    yes: bool,
+) -> SkillsResult<()> {
     let skills_dir = base_dir.join("skills");
     let skill_dir = skills_dir.join(skill_name);
     let config_path = base_dir.join("skills.toml");
@@ -46,14 +70,14 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
 
     // Check if a skill with the same name but different source URL already exists
     if let Some(existing) = config.skills.get(skill_name)
-        && existing.source_url != url
+        && existing.source_url != source_url
     {
         println!(
             "Skill '{}' is already installed from a different source:",
             skill_name
         );
         println!("  Current: {}", existing.source_url);
-        println!("  New:     {}", url);
+        println!("  New:     {}", source_url);
 
         if !confirm_action("Continue to install with new source?", yes) {
             println!("Installation cancelled.");
@@ -61,19 +85,15 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
         }
     }
 
-    let Some(resolved) = resolve(&spec)? else {
-        return Err(SkillsError::PathNotFound(url.to_string()));
-    };
-
     if let Some(existing) = config.skills.get(skill_name)
         && skill_dir.exists()
         && let Ok(checksum) = calculate_checksum(&skill_dir)
         && checksum == existing.checksum
     {
         if resolved.r#ref == existing.sha {
-            if existing.source_url != url {
+            if existing.source_url != source_url {
                 if let Some(entry) = config.skills.get_mut(skill_name) {
-                    entry.source_url = url.to_string();
+                    entry.source_url = source_url.to_string();
                 }
                 config.save(&config_path)?;
             }
@@ -113,7 +133,7 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
             let checksum = calculate_checksum(&skill_dir)?;
 
             let entry = SkillEntry {
-                source_url: url.to_string(),
+                source_url: source_url.to_string(),
                 slug: resolved.slug,
                 sha: resolved.r#ref,
                 path: resolved.path,
@@ -131,4 +151,68 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
             Err(e)
         }
     }
+}
+
+fn install_batch_skills(
+    agent: &ureq::Agent,
+    base_url: &str,
+    subdirs: &[String],
+    base_dir: &Path,
+    yes: bool,
+) -> SkillsResult<()> {
+    // Print found skills
+    println!("Found {} skills in directory:", subdirs.len());
+    for subdir in subdirs {
+        println!("  - {}", subdir);
+    }
+    println!();
+
+    // Prompt for confirmation unless --yes flag is set
+    if !confirm_action("Install all these skills?", yes) {
+        println!("Installation cancelled.");
+        return Ok(());
+    }
+
+    println!();
+
+    let mut successful = 0;
+    let mut failed = Vec::new();
+
+    for subdir in subdirs {
+        let source_url = format!("{}/{}", base_url, subdir);
+
+        // Parse and resolve child URL to get validated SHA for child path
+        let spec = GitHubUrlSpec::parse(&source_url)?;
+        let Some(resolved) = resolve(agent, &spec)? else {
+            eprintln!("Failed to install '{}': Path not found", subdir);
+            failed.push(subdir.clone());
+            continue;
+        };
+
+        println!("Installing skill '{}'...", subdir);
+        let skill_name = spec.directory_name();
+        match install_single_skill(&source_url, resolved, skill_name, base_dir, true) {
+            Ok(_) => {
+                successful += 1;
+            }
+            Err(e) => {
+                eprintln!("Failed to install '{}': {}", subdir, e);
+                failed.push(subdir.clone());
+            }
+        }
+        println!();
+    }
+
+    println!("Successfully installed: {}/{}", successful, subdirs.len());
+
+    if !failed.is_empty() {
+        println!("Failed skills:");
+        for skill in &failed {
+            println!("  - {}", skill);
+        }
+        println!();
+        return Err(SkillsError::BatchInstallationFailed { successful, failed });
+    }
+
+    Ok(())
 }

@@ -6,7 +6,7 @@ them in `skills.toml` so you can keep installs clean and up to date.
 
 ## Features
 
-- Install skills from GitHub URLs(currently only GitHub URLs are supported).
+- Install a single skill or a skill collection from GitHub (currently only GitHub URLs are supported).
 - Sync local skills with upstream changes.
 - List, update and uninstall skills.
 - Local and global modes.
@@ -37,7 +37,7 @@ skill uninstall skill-name
 ## Commands
 
 `skill install <github-url>` (alias: `skill i`)
-Install a skill from a GitHub URL.
+Install a skill or a skill collection from GitHub.
 
 `skill sync`
 Sync all skills from `skills.toml`, downloading missing skills and optionally

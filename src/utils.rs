@@ -37,7 +37,7 @@ pub fn ensure_skill_manifest(dir: &Path) -> SkillsResult<()> {
         let Some(name) = name.to_str() else {
             continue;
         };
-        if name.eq_ignore_ascii_case("skill.md") {
+        if name.eq_ignore_ascii_case("SKILL.md") {
             return Ok(());
         }
     }

@@ -10,16 +10,23 @@ pub enum SkillsError {
     NetworkError(String),
 
     // The remote resource was not found (404).
-    NotFound { url: String },
+    NotFound {
+        url: String,
+    },
 
     // Access denied for the remote resource (403).
-    Forbidden,
+    Forbidden {
+        url: String,
+    },
 
     // GitHub API rate limit was exceeded (429).
     RateLimited,
 
     // Non-OK HTTP status from the API with a message body.
-    HttpError { status: u16, message: String },
+    HttpError {
+        status: u16,
+        message: String,
+    },
 
     // The downloaded archive could not be parsed as gzip.
     InvalidArchive(String),
@@ -35,6 +42,15 @@ pub enum SkillsError {
 
     // skills.toml could not be parsed into the expected schema.
     ConfigParseError(String),
+
+    // Directory contains neither a SKILL.md nor sub-skills
+    NoSkillsFound(String),
+
+    // One or more skills failed during batch installation
+    BatchInstallationFailed {
+        successful: usize,
+        failed: Vec<String>,
+    },
 }
 
 pub type SkillsResult<T> = Result<T, SkillsError>;
@@ -54,9 +70,10 @@ impl fmt::Display for SkillsError {
                 f,
                 "Failed to access GitHub resource (HTTP 404)\n\nPossible reasons:\n  - Repository does not exist or has been deleted\n  - Branch/commit does not exist\n  - Repository is private\n\nURL: {url}"
             ),
-            SkillsError::Forbidden => write!(
+            SkillsError::Forbidden { url } => write!(
                 f,
-                "Access forbidden (HTTP 403)\n\nThe repository may be private. Private repositories are not currently supported."
+                "Access forbidden (HTTP 403)\n\nThe repository may be private. Private repositories are not currently supported.\n\nURL: {}",
+                url
             ),
             SkillsError::RateLimited => write!(
                 f,
@@ -81,6 +98,20 @@ impl fmt::Display for SkillsError {
                 f,
                 "Failed to parse skills.toml\n\nReason: {reason}\nPlease check the config file format."
             ),
+            SkillsError::NoSkillsFound(path) => write!(
+                f,
+                "No skills found at path '{path}'\n\nThe directory contains neither a SKILL.md file nor any subdirectories with SKILL.md files."
+            ),
+            SkillsError::BatchInstallationFailed { successful, failed } => {
+                write!(
+                    f,
+                    "Batch installation completed with failures\n\nSuccessfully installed: {successful}\nFailed skills:\n"
+                )?;
+                for skill in failed {
+                    writeln!(f, "  - {}", skill)?;
+                }
+                Ok(())
+            }
         }
     }
 }
