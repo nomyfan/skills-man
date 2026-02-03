@@ -1,10 +1,10 @@
 use crate::{
     cli::github::{
-        SkillDetectionResult, build_agent, detect_skill_type, download_and_extract, resolve,
+        ContentsEntry, ContentsResponse, build_agent, download_and_extract, fetch_contents_sha,
     },
     errors::{SkillsError, SkillsResult},
     models::{GitHubUrl, GitHubUrlSpec, SkillEntry, SkillsConfig},
-    utils::{calculate_checksum, ensure_skill_manifest},
+    utils::calculate_checksum,
 };
 use std::{
     fs, io,
@@ -38,29 +38,58 @@ fn confirm_action(prompt: &str, yes: bool) -> bool {
 pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> {
     let url = url.trim_end_matches('/');
     let spec = GitHubUrlSpec::parse(url)?;
-
     let agent = build_agent()?;
-    let Some(resolved) = resolve(&agent, &spec)? else {
-        return Err(SkillsError::PathNotFound(url.to_string()));
-    };
 
-    match detect_skill_type(&agent, &resolved)? {
-        SkillDetectionResult::Single => {
-            let skill_name = spec.directory_name();
-            install_single_skill(url, resolved, skill_name, base_dir, yes)
+    let mut resolved: Option<(GitHubUrl, ContentsResponse)> = None;
+    for candidate in spec.candidates() {
+        match fetch_contents_sha(&agent, &candidate) {
+            Ok(contents) => {
+                resolved = Some((candidate, contents));
+                break;
+            }
+            Err(SkillsError::NotFound { .. }) => continue,
+            Err(e) => return Err(e),
         }
-        SkillDetectionResult::Batch(subdirs) => {
-            install_batch_skills(&agent, url, &subdirs, base_dir, yes)
-        }
+    }
+    let (resolved, contents) =
+        resolved.ok_or_else(|| SkillsError::PathNotFound(url.to_string()))?;
+
+    if contents.r#type != "dir" {
+        return Err(SkillsError::InvalidResponse(format!(
+            "Expected a directory but got a {}",
+            contents.r#type
+        )));
+    }
+
+    let entries = contents.entries.unwrap_or_default();
+    let is_single = entries
+        .iter()
+        .any(|e| e.name.eq_ignore_ascii_case("SKILL.md") && e.r#type == "file");
+
+    if is_single {
+        let skill_name = spec.directory_name();
+        install_single_skill(
+            &agent,
+            url,
+            &resolved,
+            base_dir,
+            skill_name,
+            yes,
+            &contents.sha,
+        )
+    } else {
+        install_batch_skills(&agent, url, &resolved, base_dir, yes, &entries)
     }
 }
 
 fn install_single_skill(
+    agent: &ureq::Agent,
     source_url: &str,
-    resolved: GitHubUrl,
-    skill_name: &str,
+    resolved: &GitHubUrl,
     base_dir: &Path,
+    skill_name: &str,
     yes: bool,
+    sha: &str,
 ) -> SkillsResult<()> {
     let skills_dir = base_dir.join("skills");
     let skill_dir = skills_dir.join(skill_name);
@@ -85,125 +114,213 @@ fn install_single_skill(
         }
     }
 
+    // Check if already installed and up to date
     if let Some(existing) = config.skills.get(skill_name)
         && skill_dir.exists()
+        && sha == existing.sha
         && let Ok(checksum) = calculate_checksum(&skill_dir)
         && checksum == existing.checksum
     {
-        if resolved.r#ref == existing.sha {
-            if existing.source_url != source_url {
-                if let Some(entry) = config.skills.get_mut(skill_name) {
-                    entry.source_url = source_url.to_string();
-                }
-                config.save(&config_path)?;
+        if existing.source_url != source_url {
+            if let Some(entry) = config.skills.get_mut(skill_name) {
+                entry.source_url = source_url.to_string();
             }
-            println!(
-                "Skill '{}' is already installed and up to date.",
-                skill_name
-            );
-            return Ok(());
-        } else {
-            println!(
-                "Skill '{}' is already installed. Upstream ref has moved to new commit, updating...",
-                skill_name
-            );
+            config.save(&config_path)?;
         }
+        println!(
+            "Skill '{}' is already installed and up to date.",
+            skill_name
+        );
+        return Ok(());
     }
 
-    let temp_dir = skills_dir.join(format!(".{}.tmp", skill_name));
+    // Need to download
+    println!("Installing skill '{}'...", skill_name);
+
+    let temp_dir = skills_dir.join(".download.tmp");
     if temp_dir.exists() {
         fs::remove_dir_all(&temp_dir)?;
     }
     fs::create_dir_all(&temp_dir)?;
 
-    println!("Downloading skill '{}'...", skill_name);
-    match download_and_extract(&resolved, &temp_dir) {
-        Ok(_) => {
-            if let Err(e) = ensure_skill_manifest(&temp_dir) {
-                fs::remove_dir_all(&temp_dir).ok();
-                return Err(e);
-            }
-
-            if skill_dir.exists() {
-                fs::remove_dir_all(&skill_dir)?;
-            }
-
-            fs::rename(&temp_dir, &skill_dir)?;
-
-            let checksum = calculate_checksum(&skill_dir)?;
-
-            let entry = SkillEntry {
-                source_url: source_url.to_string(),
-                slug: resolved.slug,
-                sha: resolved.r#ref,
-                path: resolved.path,
-                checksum,
-            };
-
-            config.skills.insert(skill_name.to_string(), entry);
-            config.save(&config_path)?;
-
-            println!("Successfully installed skill '{}'.", skill_name);
-            Ok(())
-        }
-        Err(e) => {
-            fs::remove_dir_all(&temp_dir).ok();
-            Err(e)
-        }
+    if let Err(e) = download_and_extract(agent, resolved, &temp_dir) {
+        fs::remove_dir_all(&temp_dir).ok();
+        return Err(e);
     }
+
+    // Move temp directory to final location
+    if skill_dir.exists() {
+        fs::remove_dir_all(&skill_dir)?;
+    }
+    fs::rename(&temp_dir, &skill_dir)?;
+
+    let checksum = calculate_checksum(&skill_dir)?;
+
+    let entry = SkillEntry {
+        source_url: source_url.to_string(),
+        slug: resolved.slug.clone(),
+        sha: sha.to_string(),
+        path: resolved.path.clone(),
+        checksum,
+    };
+
+    config.skills.insert(skill_name.to_string(), entry);
+    config.save(&config_path)?;
+
+    println!("Successfully installed skill '{}'.", skill_name);
+    Ok(())
+}
+
+/// Check if a skill needs update by comparing SHA
+fn skill_needs_update(
+    config: &SkillsConfig,
+    skill_name: &str,
+    skill_dir: &Path,
+    sha: &str,
+) -> bool {
+    let Some(existing) = config.skills.get(skill_name) else {
+        return true; // Not installed
+    };
+    if !skill_dir.exists() {
+        return true; // Directory missing
+    }
+    if sha != existing.sha {
+        return true; // SHA changed
+    }
+    // Check local modifications
+    let Ok(checksum) = calculate_checksum(skill_dir) else {
+        return true;
+    };
+    checksum != existing.checksum
 }
 
 fn install_batch_skills(
     agent: &ureq::Agent,
     base_url: &str,
-    subdirs: &[String],
+    resolved: &GitHubUrl,
     base_dir: &Path,
     yes: bool,
+    entries: &[ContentsEntry],
 ) -> SkillsResult<()> {
-    // Print found skills
-    println!("Found {} skills in directory:", subdirs.len());
-    for subdir in subdirs {
+    let skills_dir = base_dir.join("skills");
+    let config_path = base_dir.join("skills.toml");
+    let mut config = SkillsConfig::from_file(&config_path)?;
+
+    let skill_entries: Vec<&ContentsEntry> = entries.iter().filter(|e| e.r#type == "dir").collect();
+
+    if skill_entries.is_empty() {
+        return Err(SkillsError::NoSkillsFound(resolved.path.clone()));
+    }
+
+    // Check which skills need update
+    let skills_to_update: Vec<(&str, &str)> = skill_entries
+        .iter()
+        .filter_map(|e| {
+            let skill_name = &e.name;
+            let skill_dir = skills_dir.join(skill_name);
+            if skill_needs_update(&config, skill_name, &skill_dir, &e.sha) {
+                Some((skill_name.as_ref(), e.sha.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if skills_to_update.is_empty() {
+        println!("All {} skills are already up to date.", skill_entries.len());
+        return Ok(());
+    }
+
+    println!("Found {} skills to install/update:", skills_to_update.len());
+    for (subdir, _) in &skills_to_update {
         println!("  - {}", subdir);
     }
     println!();
 
-    // Prompt for confirmation unless --yes flag is set
-    if !confirm_action("Install all these skills?", yes) {
+    if !confirm_action("Install these skills?", yes) {
         println!("Installation cancelled.");
         return Ok(());
     }
 
     println!();
 
+    // Download the entire top-level directory once
+    let temp_dir = skills_dir.join(".download.tmp");
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)?;
+    }
+    fs::create_dir_all(&temp_dir)?;
+
+    if let Err(e) = download_and_extract(agent, resolved, &temp_dir) {
+        fs::remove_dir_all(&temp_dir).ok();
+        return Err(e);
+    }
+
+    // Move each sub-skill directory to final location
     let mut successful = 0;
     let mut failed = Vec::new();
 
-    for subdir in subdirs {
+    for (subdir, sha) in &skills_to_update {
         let source_url = format!("{}/{}", base_url, subdir);
+        let temp_skill_dir = temp_dir.join(subdir);
+        let skill_dir = skills_dir.join(*subdir);
 
-        // Parse and resolve child URL to get validated SHA for child path
-        let spec = GitHubUrlSpec::parse(&source_url)?;
-        let Some(resolved) = resolve(agent, &spec)? else {
-            eprintln!("Failed to install '{}': Path not found", subdir);
-            failed.push(subdir.clone());
+        if !temp_skill_dir.exists() {
+            eprintln!(
+                "Failed to install '{}': directory not found in download",
+                subdir
+            );
+            failed.push(subdir.to_string());
             continue;
-        };
+        }
 
-        println!("Installing skill '{}'...", subdir);
-        let skill_name = spec.directory_name();
-        match install_single_skill(&source_url, resolved, skill_name, base_dir, true) {
-            Ok(_) => {
-                successful += 1;
-            }
+        // Move to final location
+        if skill_dir.exists()
+            && let Err(e) = fs::remove_dir_all(&skill_dir)
+        {
+            eprintln!("Failed to install '{}': {}", subdir, e);
+            failed.push(subdir.to_string());
+            continue;
+        }
+
+        if let Err(e) = fs::rename(&temp_skill_dir, &skill_dir) {
+            eprintln!("Failed to install '{}': {}", subdir, e);
+            failed.push(subdir.to_string());
+            continue;
+        }
+
+        let checksum = match calculate_checksum(&skill_dir) {
+            Ok(c) => c,
             Err(e) => {
                 eprintln!("Failed to install '{}': {}", subdir, e);
-                failed.push(subdir.clone());
+                failed.push(subdir.to_string());
+                continue;
             }
-        }
-        println!();
+        };
+
+        let entry = SkillEntry {
+            source_url,
+            slug: resolved.slug.clone(),
+            sha: (*sha).to_string(),
+            path: format!("{}/{}", resolved.path, subdir),
+            checksum,
+        };
+
+        config.skills.insert((*subdir).to_string(), entry);
+        config.save(&config_path)?;
+        println!("Successfully installed skill '{}'.", subdir);
+        successful += 1;
     }
 
-    println!("Successfully installed: {}/{}", successful, subdirs.len());
+    // Clean up temp directory
+    fs::remove_dir_all(&temp_dir).ok();
+
+    println!();
+    println!(
+        "Successfully installed: {}/{}",
+        successful,
+        skills_to_update.len()
+    );
 
     if !failed.is_empty() {
         println!("Failed skills:");

@@ -31,6 +31,9 @@ pub enum SkillsError {
     // The downloaded archive could not be parsed as gzip.
     InvalidArchive(String),
 
+    // The API response body could not be parsed as expected.
+    InvalidResponse(String),
+
     // The requested path does not exist at the resolved ref.
     PathNotFound(String),
 
@@ -84,6 +87,9 @@ impl fmt::Display for SkillsError {
             }
             SkillsError::InvalidArchive(reason) => {
                 write!(f, "Downloaded file is not a valid gzip archive\n\n{reason}")
+            }
+            SkillsError::InvalidResponse(reason) => {
+                write!(f, "Unexpected API response\n\nReason: {reason}")
             }
             SkillsError::PathNotFound(path) => write!(
                 f,

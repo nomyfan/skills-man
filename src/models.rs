@@ -108,15 +108,6 @@ impl GitHubUrl {
             self.slug, self.r#ref
         )
     }
-
-    pub fn commits_url(&self) -> String {
-        format!(
-            "https://api.github.com/repos/{}/commits?ref={}&path={}&per_page=1",
-            self.slug,
-            urlencoding::encode(&self.r#ref),
-            urlencoding::encode(&self.path)
-        )
-    }
 }
 
 #[cfg(test)]

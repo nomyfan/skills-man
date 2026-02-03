@@ -5,11 +5,12 @@ use crate::{
 };
 use std::{fs, io, io::Write as IoWrite, path::Path};
 
-use super::github::download_and_extract;
+use super::github::{build_agent, download_and_extract};
 
 pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
     let config_path = base_dir.join("skills.toml");
     let mut config = SkillsConfig::from_file(&config_path)?;
+    let agent = build_agent()?;
 
     let skills_dir = base_dir.join("skills");
 
@@ -89,7 +90,7 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
                 continue;
             }
 
-            match download_and_extract(&github_url, &temp_dir) {
+            match download_and_extract(&agent, &github_url, &temp_dir) {
                 Ok(_) => {
                     if let Err(e) = ensure_skill_manifest(&temp_dir) {
                         eprintln!("[{}] Downloaded but invalid skill: {}", name, e);
