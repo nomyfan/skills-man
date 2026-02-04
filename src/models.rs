@@ -40,7 +40,10 @@ impl SkillsConfig {
 pub struct SkillEntry {
     pub source_url: String,
     pub slug: String,
+    #[serde(rename = "ref")]
+    pub commit: String,
     pub path: String,
+    /// Tree SHA
     pub sha: String,
     pub checksum: String,
 }
@@ -87,17 +90,32 @@ impl GitHubUrlSpec {
         (1..self.tail.len())
             .map(|split| GitHubUrl {
                 slug: self.slug.clone(),
-                r#ref: self.tail[..split].join("/"),
+                r#ref: GitRef::Other(self.tail[..split].join("/").to_string()),
                 path: self.tail[split..].join("/"),
             })
             .collect()
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitRef {
+    CommitSHA(String),
+    Other(String),
+}
+
+impl GitRef {
+    pub fn as_str(&self) -> &str {
+        match self {
+            GitRef::CommitSHA(s) => s,
+            GitRef::Other(s) => s,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GitHubUrl {
     pub slug: String,
-    pub r#ref: String,
+    pub r#ref: GitRef,
     pub path: String,
 }
 
@@ -105,7 +123,17 @@ impl GitHubUrl {
     pub fn tarball_url(&self) -> String {
         format!(
             "https://api.github.com/repos/{}/tarball/{}",
-            self.slug, self.r#ref
+            self.slug,
+            self.r#ref.as_str()
+        )
+    }
+
+    pub fn commits_url(&self) -> String {
+        format!(
+            "https://api.github.com/repos/{}/commits?ref={}&path={}&per_page=1",
+            self.slug,
+            urlencoding::encode(self.r#ref.as_str()),
+            urlencoding::encode(&self.path)
         )
     }
 }
@@ -166,7 +194,8 @@ mod tests {
                 .unwrap()
                 .candidates();
         assert!(candidates.iter().any(|candidate| {
-            candidate.r#ref == "release/v1.0" && candidate.path == "hotfix/skill"
+            candidate.r#ref == GitRef::Other("release/v1.0".to_string())
+                && candidate.path == "hotfix/skill"
         }));
     }
 
@@ -225,7 +254,7 @@ mod tests {
     fn test_tarball_url() {
         let github_url = GitHubUrl {
             slug: "anthropics/skills".to_string(),
-            r#ref: "main".to_string(),
+            r#ref: GitRef::Other("main".to_string()),
             path: "skills/frontend-design".to_string(),
         };
 
@@ -282,6 +311,7 @@ mod tests {
             SkillEntry {
                 source_url: "https://github.com/owner/repo/tree/main/path".to_string(),
                 slug: "owner/repo".to_string(),
+                commit: "main".to_string(),
                 sha: "main".to_string(),
                 path: "path".to_string(),
                 checksum: "sha256:abc123".to_string(),

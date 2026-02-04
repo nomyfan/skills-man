@@ -1,6 +1,6 @@
 use crate::{
     errors::SkillsResult,
-    models::{GitHubUrl, SkillsConfig},
+    models::{GitHubUrl, GitRef, SkillsConfig},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
 use std::{fs, io, io::Write as IoWrite, path::Path};
@@ -77,7 +77,7 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
         if needs_download {
             let github_url = GitHubUrl {
                 slug: entry.slug.clone(),
-                r#ref: entry.sha.clone(),
+                r#ref: GitRef::CommitSHA(entry.commit.clone()),
                 path: entry.path.clone(),
             };
 

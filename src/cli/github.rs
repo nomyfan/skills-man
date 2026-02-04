@@ -126,6 +126,43 @@ pub(super) fn download_and_extract(
     Ok(())
 }
 
+pub(super) fn resolve_commit_sha(
+    agent: &ureq::Agent,
+    github_url: &GitHubUrl,
+) -> SkillsResult<String> {
+    let url = github_url.commits_url();
+    match agent
+        .get(&url)
+        .header("User-Agent", "skills-man")
+        .header("Accept", "application/vnd.github+json")
+        .call()
+    {
+        Ok(response) => {
+            let json: serde_json::Value = response
+                .into_body()
+                .read_json()
+                .map_err(|e| SkillsError::InvalidResponse(e.to_string()))?;
+            let sha = json
+                .get(0)
+                .and_then(|x| x.get("sha"))
+                .and_then(|x| x.as_str())
+                .ok_or_else(|| SkillsError::InvalidResponse("Missing sha in response".to_string()))?
+                .to_string();
+            Ok(sha)
+        }
+        Err(ureq::Error::StatusCode(status)) => match status {
+            404 | 422 => Err(SkillsError::NotFound { url }),
+            403 => Err(SkillsError::Forbidden { url }),
+            429 => Err(SkillsError::RateLimited),
+            _ => Err(SkillsError::HttpError {
+                status,
+                message: url,
+            }),
+        },
+        Err(e) => Err(SkillsError::NetworkError(e.to_string())),
+    }
+}
+
 /// Fetches directory SHA and entries from GitHub Contents API.
 pub(super) fn fetch_contents_sha(
     agent: &ureq::Agent,
@@ -135,7 +172,7 @@ pub(super) fn fetch_contents_sha(
         "https://api.github.com/repos/{}/contents/{}?ref={}",
         github_url.slug,
         github_url.path,
-        urlencoding::encode(&github_url.r#ref)
+        urlencoding::encode(github_url.r#ref.as_str())
     );
     match agent
         .get(&url)

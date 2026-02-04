@@ -1,9 +1,10 @@
 use crate::{
     cli::github::{
         ContentsEntry, ContentsResponse, build_agent, download_and_extract, fetch_contents_sha,
+        resolve_commit_sha,
     },
     errors::{SkillsError, SkillsResult},
-    models::{GitHubUrl, GitHubUrlSpec, SkillEntry, SkillsConfig},
+    models::{GitHubUrl, GitHubUrlSpec, GitRef, SkillEntry, SkillsConfig},
     utils::calculate_checksum,
 };
 use std::{
@@ -71,21 +72,21 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
         install_single_skill(
             &agent,
             url,
-            &resolved,
+            resolved,
             base_dir,
             skill_name,
             yes,
             &contents.sha,
         )
     } else {
-        install_batch_skills(&agent, url, &resolved, base_dir, yes, &entries)
+        install_batch_skills(&agent, url, resolved, base_dir, yes, &entries)
     }
 }
 
 fn install_single_skill(
     agent: &ureq::Agent,
     source_url: &str,
-    resolved: &GitHubUrl,
+    resolved: GitHubUrl,
     base_dir: &Path,
     skill_name: &str,
     yes: bool,
@@ -143,7 +144,7 @@ fn install_single_skill(
     }
     fs::create_dir_all(&temp_dir)?;
 
-    if let Err(e) = download_and_extract(agent, resolved, &temp_dir) {
+    if let Err(e) = download_and_extract(agent, &resolved, &temp_dir) {
         fs::remove_dir_all(&temp_dir).ok();
         return Err(e);
     }
@@ -156,11 +157,16 @@ fn install_single_skill(
 
     let checksum = calculate_checksum(&skill_dir)?;
 
+    let commit_sha = match &resolved.r#ref {
+        GitRef::CommitSHA(sha) => sha.clone(),
+        GitRef::Other(_) => resolve_commit_sha(agent, &resolved)?,
+    };
     let entry = SkillEntry {
         source_url: source_url.to_string(),
-        slug: resolved.slug.clone(),
+        slug: resolved.slug,
+        commit: commit_sha,
         sha: sha.to_string(),
-        path: resolved.path.clone(),
+        path: resolved.path,
         checksum,
     };
 
@@ -197,7 +203,7 @@ fn skill_needs_update(
 fn install_batch_skills(
     agent: &ureq::Agent,
     base_url: &str,
-    resolved: &GitHubUrl,
+    resolved: GitHubUrl,
     base_dir: &Path,
     yes: bool,
     entries: &[ContentsEntry],
@@ -251,7 +257,7 @@ fn install_batch_skills(
     }
     fs::create_dir_all(&temp_dir)?;
 
-    if let Err(e) = download_and_extract(agent, resolved, &temp_dir) {
+    if let Err(e) = download_and_extract(agent, &resolved, &temp_dir) {
         fs::remove_dir_all(&temp_dir).ok();
         return Err(e);
     }
@@ -298,9 +304,22 @@ fn install_batch_skills(
             }
         };
 
+        let commit_sha = match &resolved.r#ref {
+            GitRef::CommitSHA(sha) => sha.clone(),
+            GitRef::Other(_) => {
+                let skill_github_url = GitHubUrl {
+                    slug: resolved.slug.clone(),
+                    r#ref: resolved.r#ref.clone(),
+                    path: format!("{}/{}", resolved.path, subdir),
+                };
+                resolve_commit_sha(agent, &skill_github_url)?
+            }
+        };
+
         let entry = SkillEntry {
             source_url,
             slug: resolved.slug.clone(),
+            commit: commit_sha,
             sha: (*sha).to_string(),
             path: format!("{}/{}", resolved.path, subdir),
             checksum,
