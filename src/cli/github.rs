@@ -6,7 +6,8 @@ use flate2::read::GzDecoder;
 use serde::Deserialize;
 use std::{env, fs, path::Path};
 use tar::Archive;
-use ureq::config::Config;
+use ureq::typestate::WithoutBody;
+use ureq::{RequestBuilder, config::Config};
 
 fn proxy_from_env() -> Option<String> {
     for key in [
@@ -27,7 +28,27 @@ fn proxy_from_env() -> Option<String> {
     None
 }
 
-pub(super) fn build_agent() -> SkillsResult<ureq::Agent> {
+fn github_token_from_env() -> Option<String> {
+    for key in ["GITHUB_TOKEN", "GH_TOKEN"] {
+        if let Ok(value) = env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn config_github_request(request: RequestBuilder<WithoutBody>) -> RequestBuilder<WithoutBody> {
+    let mut request = request.header("User-Agent", "skills-man");
+    if let Some(token) = github_token_from_env() {
+        request = request.header("Authorization", &format!("Bearer {token}"));
+    }
+    request
+}
+
+pub(super) fn create_agent() -> SkillsResult<ureq::Agent> {
     if let Some(proxy_url) = proxy_from_env() {
         let proxy =
             ureq::Proxy::new(&proxy_url).map_err(|e| SkillsError::NetworkError(e.to_string()))?;
@@ -38,12 +59,13 @@ pub(super) fn build_agent() -> SkillsResult<ureq::Agent> {
     }
 }
 
-pub(super) fn download_and_extract(github_url: &GitHubUrl, dest_dir: &Path) -> SkillsResult<()> {
-    let agent = build_agent()?;
+pub(super) fn download_and_extract(
+    agent: &ureq::Agent,
+    github_url: &GitHubUrl,
+    dest_dir: &Path,
+) -> SkillsResult<()> {
     let url = github_url.tarball_url();
-    let response = match agent
-        .get(&url)
-        .header("User-Agent", "skills-man")
+    let response = match config_github_request(agent.get(&url))
         .header("Accept", "application/vnd.github+json")
         .call()
     {
@@ -107,17 +129,12 @@ pub(super) fn download_and_extract(github_url: &GitHubUrl, dest_dir: &Path) -> S
     Ok(())
 }
 
-/// Validates that the ref and path exist on GitHub and resolves to a commit SHA.
-/// Uses the GitHub commits API with both ref and path parameters.
-/// Returns Ok(Some(sha)) if both ref and path are valid, Ok(None) if not found.
-pub(super) fn resolve_to_sha(
+pub(super) fn resolve_commit_sha(
     agent: &ureq::Agent,
     github_url: &GitHubUrl,
 ) -> SkillsResult<Option<String>> {
     let url = github_url.commits_url();
-    match agent
-        .get(&url)
-        .header("User-Agent", "skills-man")
+    match config_github_request(agent.get(&url))
         .header("Accept", "application/vnd.github+json")
         .call()
     {
@@ -152,7 +169,7 @@ pub(crate) fn resolve(
     spec: &GitHubUrlSpec,
 ) -> SkillsResult<Option<GitHubUrl>> {
     for candidate in spec.candidates() {
-        let sha = resolve_to_sha(agent, &candidate)?;
+        let sha = resolve_commit_sha(agent, &candidate)?;
         if let Some(sha) = sha {
             return Ok(Some(GitHubUrl {
                 r#ref: sha,
@@ -186,9 +203,7 @@ fn list_directory_contents(
         github_url.slug, github_url.path, github_url.r#ref
     );
 
-    match agent
-        .get(&url)
-        .header("User-Agent", "skills-man")
+    match config_github_request(agent.get(&url))
         .header("Accept", "application/vnd.github+json")
         .call()
     {

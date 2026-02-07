@@ -1,6 +1,6 @@
 use crate::{
     cli::github::{
-        SkillDetectionResult, build_agent, detect_skill_type, download_and_extract, resolve,
+        SkillDetectionResult, create_agent, detect_skill_type, download_and_extract, resolve,
     },
     errors::{SkillsError, SkillsResult},
     models::{GitHubUrl, GitHubUrlSpec, SkillEntry, SkillsConfig},
@@ -39,7 +39,7 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
     let url = url.trim_end_matches('/');
     let spec = GitHubUrlSpec::parse(url)?;
 
-    let agent = build_agent()?;
+    let agent = create_agent()?;
     let Some(resolved) = resolve(&agent, &spec)? else {
         return Err(SkillsError::PathNotFound(url.to_string()));
     };
@@ -47,7 +47,7 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
     match detect_skill_type(&agent, &resolved)? {
         SkillDetectionResult::Single => {
             let skill_name = spec.directory_name();
-            install_single_skill(url, resolved, skill_name, base_dir, yes)
+            install_single_skill(&agent, url, resolved, skill_name, base_dir, yes)
         }
         SkillDetectionResult::Batch(subdirs) => {
             install_batch_skills(&agent, url, &subdirs, base_dir, yes)
@@ -56,6 +56,7 @@ pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
 }
 
 fn install_single_skill(
+    agent: &ureq::Agent,
     source_url: &str,
     resolved: GitHubUrl,
     skill_name: &str,
@@ -117,7 +118,7 @@ fn install_single_skill(
     fs::create_dir_all(&temp_dir)?;
 
     println!("Downloading skill '{}'...", skill_name);
-    match download_and_extract(&resolved, &temp_dir) {
+    match download_and_extract(agent, &resolved, &temp_dir) {
         Ok(_) => {
             if let Err(e) = ensure_skill_manifest(&temp_dir) {
                 fs::remove_dir_all(&temp_dir).ok();
@@ -191,7 +192,7 @@ fn install_batch_skills(
 
         println!("Installing skill '{}'...", subdir);
         let skill_name = spec.directory_name();
-        match install_single_skill(&source_url, resolved, skill_name, base_dir, true) {
+        match install_single_skill(agent, &source_url, resolved, skill_name, base_dir, true) {
             Ok(_) => {
                 successful += 1;
             }

@@ -1,4 +1,5 @@
 use crate::{
+    cli::github::create_agent,
     errors::SkillsResult,
     models::{GitHubUrl, SkillsConfig},
     utils::{calculate_checksum, ensure_skill_manifest},
@@ -37,6 +38,7 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
     }
 
     let skill_names: Vec<String> = config.skills.keys().cloned().collect();
+    let agent = create_agent()?;
 
     for name in skill_names {
         let entry = config.skills.get(&name).unwrap();
@@ -89,7 +91,7 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
                 continue;
             }
 
-            match download_and_extract(&github_url, &temp_dir) {
+            match download_and_extract(&agent, &github_url, &temp_dir) {
                 Ok(_) => {
                     if let Err(e) = ensure_skill_manifest(&temp_dir) {
                         eprintln!("[{}] Downloaded but invalid skill: {}", name, e);
