@@ -4,9 +4,9 @@ use crate::{
     models::{GitHubUrl, SkillsConfig},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
-use std::{fs, io, io::Write as IoWrite, path::Path};
+use std::{fs, path::Path};
 
-use super::github::download_and_extract;
+use super::{github::download_and_extract, prompt::confirm_action};
 
 pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
     let config_path = base_dir.join("skills.toml");
@@ -59,14 +59,7 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
                         name
                     );
 
-                    print!("Overwrite local changes? (y/N): ");
-                    io::stdout().flush().ok();
-
-                    let mut input = String::new();
-                    io::stdin().read_line(&mut input).ok();
-                    let answer = input.trim().to_lowercase();
-
-                    answer == "y" || answer == "yes"
+                    confirm_action("Overwrite local changes?")
                 }
                 Err(e) => {
                     eprintln!("[{}] Error calculating checksum: {}", name, e);

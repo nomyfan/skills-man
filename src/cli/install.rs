@@ -6,34 +6,9 @@ use crate::{
     models::{GitHubUrl, GitHubUrlSpec, SkillEntry, SkillsConfig},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
-use std::{
-    fs, io,
-    io::{IsTerminal, Write as IoWrite},
-    path::Path,
-};
+use std::{fs, path::Path};
 
-/// Prompt user for confirmation
-/// Returns true if yes flag is set, or if user confirms in interactive mode
-/// Returns false if stdin is not a TTY (non-interactive context)
-fn confirm_action(prompt: &str, yes: bool) -> bool {
-    if yes {
-        return true;
-    }
-
-    if !io::stdin().is_terminal() {
-        eprintln!("Non-interactive mode detected. Use --yes flag to auto-confirm.");
-        return false;
-    }
-
-    print!("{} (y/N): ", prompt);
-    io::stdout().flush().ok();
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).ok();
-    let answer = input.trim().to_lowercase();
-
-    answer == "y" || answer == "yes"
-}
+use super::prompt::confirm_action_or_yes;
 
 pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> {
     let url = url.trim_end_matches('/');
@@ -80,7 +55,7 @@ fn install_single_skill(
         println!("  Current: {}", existing.source_url);
         println!("  New:     {}", source_url);
 
-        if !confirm_action("Continue to install with new source?", yes) {
+        if !confirm_action_or_yes("Continue to install with new source?", yes) {
             println!("Installation cancelled.");
             return Ok(());
         }
@@ -169,7 +144,7 @@ fn install_batch_skills(
     println!();
 
     // Prompt for confirmation unless --yes flag is set
-    if !confirm_action("Install all these skills?", yes) {
+    if !confirm_action_or_yes("Install all these skills?", yes) {
         println!("Installation cancelled.");
         return Ok(());
     }
