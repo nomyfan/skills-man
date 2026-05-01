@@ -32,12 +32,10 @@ fn proxy_from_env() -> Option<String> {
 
 fn github_token_from_env() -> Option<String> {
     for key in ["GITHUB_TOKEN", "GH_TOKEN"] {
-        if let Ok(value) = env::var(key) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
+        if let Ok(value) = env::var(key)
+            && !value.is_empty() {
+                return Some(value.to_string());
             }
-        }
     }
     None
 }

@@ -4,7 +4,11 @@ mod models;
 mod utils;
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::OsString,
+    path::{Path, PathBuf},
+};
 
 #[derive(Parser)]
 #[command(name = "skills-man")]
@@ -52,14 +56,60 @@ enum Commands {
     List,
 }
 
+fn get_global_dir() -> Option<PathBuf> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .map(|home| PathBuf::from(home).join(".skills-man"))
+}
+
 fn get_base_dir(global: bool) -> Result<PathBuf, String> {
     if global {
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .map_err(|_| "Unable to determine home directory".to_string())?;
-        Ok(PathBuf::from(home).join(".skills-man"))
+        get_global_dir().ok_or_else(|| "Unable to determine home directory".to_string())
     } else {
         Ok(PathBuf::from("."))
+    }
+}
+
+fn merge_env_file(
+    path: &Path,
+    protected_env: &HashSet<OsString>,
+    merged_env: &mut HashMap<String, String>,
+) {
+    let Ok(iter) = dotenvy::from_path_iter(path) else {
+        return;
+    };
+
+    for item in iter {
+        let Ok((key, value)) = item else {
+            continue;
+        };
+
+        let key_os = OsString::from(&key);
+        if protected_env.contains(&key_os) {
+            continue;
+        }
+
+        merged_env.insert(key, value);
+    }
+}
+
+fn load_env_files() {
+    let protected_env = std::env::vars_os()
+        .map(|(key, _)| key)
+        .collect::<HashSet<_>>();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut merged_env = HashMap::new();
+
+    if let Some(global_dir) = get_global_dir() {
+        merge_env_file(&global_dir.join(".env"), &protected_env, &mut merged_env);
+    }
+    merge_env_file(&cwd.join(".env"), &protected_env, &mut merged_env);
+
+    for (key, value) in merged_env {
+        // SAFETY: this runs during single-threaded CLI startup, before any
+        // worker threads or foreign-library calls can read the environment.
+        unsafe { std::env::set_var(key, value) };
     }
 }
 
@@ -73,6 +123,8 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    load_env_files();
 
     let result = match cli.command {
         Commands::Install { url, yes } => cli::install_skill(&url, &base_dir, yes),

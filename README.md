@@ -10,6 +10,7 @@ them in `skills.toml` so you can keep installs clean and up to date.
 - Sync local skills with upstream changes.
 - List, update and uninstall skills.
 - Local and global modes.
+- Load environment variables from `.env` files in the current and global directories.
 
 ## Quick start
 
@@ -33,6 +34,24 @@ skill sync
 skill update skill-name
 skill uninstall skill-name
 ```
+
+## Environment variables
+
+At startup, `skill` loads environment variables from `.env` files in the global
+directory and current directory. Priority is:
+
+1. Existing shell environment variables
+2. Current directory `.env`
+3. Global directory `.env`
+
+Set `GITHUB_TOKEN` or `GH_TOKEN` when installing from GitHub:
+
+```dotenv
+GITHUB_TOKEN=github_pat_...
+```
+
+The token is sent with GitHub API requests so `skill` can use authenticated rate
+limits and access private repositories that your token is allowed to read.
 
 ## Commands
 
