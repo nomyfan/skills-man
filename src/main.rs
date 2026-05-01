@@ -12,7 +12,7 @@ use std::{
 
 #[derive(Parser)]
 #[command(name = "skills-man")]
-#[command(version("0.1.1"))]
+#[command(version("0.2.0"))]
 #[command(about = "Manage Agents skills")]
 struct Cli {
     /// Use global directory (~/.skills-man)
