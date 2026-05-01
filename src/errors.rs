@@ -31,8 +31,8 @@ pub enum SkillsError {
     // The downloaded archive could not be parsed as gzip.
     InvalidArchive(String),
 
-    // The requested path does not exist at the resolved ref.
-    PathNotFound(String),
+    // The requested paths do not exist at the resolved ref.
+    PathNotFound(Vec<String>),
 
     // Skill directory missing the manifest file.
     MissingSkillManifest,
@@ -85,10 +85,18 @@ impl fmt::Display for SkillsError {
             SkillsError::InvalidArchive(reason) => {
                 write!(f, "Downloaded file is not a valid gzip archive\n\n{reason}")
             }
-            SkillsError::PathNotFound(path) => write!(
-                f,
-                "Path '{path}' not found in repository\n\nPossible reasons:\n  - Path is misspelled\n  - Path does not exist at the specified commit/branch"
-            ),
+            SkillsError::PathNotFound(paths) => {
+                let label = if paths.len() == 1 { "Path" } else { "Paths" };
+                write!(
+                    f,
+                    "{label} not found in repository:\n{}\n\nPossible reasons:\n  - Path is misspelled\n  - Path does not exist at the specified commit/branch",
+                    paths
+                        .iter()
+                        .map(|path| format!("  - {path}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            }
             SkillsError::MissingSkillManifest => write!(
                 f,
                 "Invalid skill\n\nExpect 'SKILL.md' or 'skill.md' in the directory."

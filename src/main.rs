@@ -21,7 +21,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(alias = "i")]
+    /// Install a skill or skill collection from GitHub
+    #[command(visible_alias = "i")]
     Install {
         /// GitHub URL of the skill to install
         url: String,
@@ -29,8 +30,9 @@ enum Commands {
         #[arg(short, long)]
         yes: bool,
     },
+    /// Sync installed skills from skills.toml
     Sync,
-    #[command(alias = "up")]
+    #[command(visible_alias = "up")]
     /// Check upstream and update a single skill
     Update {
         /// Name of the skill to update
@@ -39,11 +41,14 @@ enum Commands {
         #[arg(short, long)]
         yes: bool,
     },
+    /// Remove an installed skill
+    #[command(visible_alias = "rm")]
     Uninstall {
         /// Name of the skill to uninstall
         name: String,
     },
     /// List all installed skills
+    #[command(visible_alias = "ls")]
     List,
 }
 

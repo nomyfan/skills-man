@@ -6,31 +6,16 @@ use crate::{
 };
 use std::{fs, path::Path};
 
-use super::{github::download_and_extract, prompt::confirm_action};
+use super::{
+    github::{ExtractTarget, download_and_extract},
+    prompt::confirm_action,
+};
 
 pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
     let config_path = base_dir.join("skills.toml");
     let mut config = SkillsConfig::from_file(&config_path)?;
 
     let skills_dir = base_dir.join("skills");
-
-    if skills_dir.exists() {
-        for entry in fs::read_dir(&skills_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-
-            let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-                continue;
-            };
-
-            if name.starts_with('.') {
-                continue;
-            }
-        }
-    }
 
     if config.skills.is_empty() {
         println!("No skills configured in skills.toml");
@@ -72,6 +57,7 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
             let github_url = GitHubUrl {
                 slug: entry.slug.clone(),
                 r#ref: entry.sha.clone(),
+                sha: entry.sha.clone(),
                 path: entry.path.clone(),
             };
 
@@ -84,7 +70,12 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
                 continue;
             }
 
-            match download_and_extract(&agent, &github_url, &temp_dir) {
+            let target = ExtractTarget {
+                path: github_url.path.clone(),
+                dest_dir: temp_dir.clone(),
+            };
+
+            match download_and_extract(&agent, &github_url.tarball_url(), &[target]) {
                 Ok(_) => {
                     if let Err(e) = ensure_skill_manifest(&temp_dir) {
                         eprintln!("[{}] Downloaded but invalid skill: {}", name, e);

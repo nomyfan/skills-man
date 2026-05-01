@@ -85,10 +85,14 @@ impl GitHubUrlSpec {
 
     pub fn candidates(&self) -> Vec<GitHubUrl> {
         (1..self.tail.len())
-            .map(|split| GitHubUrl {
-                slug: self.slug.clone(),
-                r#ref: self.tail[..split].join("/"),
-                path: self.tail[split..].join("/"),
+            .map(|split| {
+                let r#ref = self.tail[..split].join("/");
+                GitHubUrl {
+                    slug: self.slug.clone(),
+                    sha: r#ref.clone(),
+                    r#ref,
+                    path: self.tail[split..].join("/"),
+                }
             })
             .collect()
     }
@@ -98,23 +102,54 @@ impl GitHubUrlSpec {
 pub struct GitHubUrl {
     pub slug: String,
     pub r#ref: String,
+    pub sha: String,
     pub path: String,
 }
 
 impl GitHubUrl {
+    pub fn with_sha(mut self, sha: String) -> Self {
+        self.sha = sha;
+        self
+    }
+
+    pub fn child(&self, child_name: &str) -> Self {
+        Self {
+            slug: self.slug.clone(),
+            r#ref: self.sha.clone(),
+            sha: self.sha.clone(),
+            path: format!("{}/{}", self.path, child_name),
+        }
+    }
+
     pub fn tarball_url(&self) -> String {
         format!(
             "https://api.github.com/repos/{}/tarball/{}",
-            self.slug, self.r#ref
+            self.slug,
+            urlencoding::encode(&self.sha)
         )
     }
 
     pub fn commits_url(&self) -> String {
         format!(
-            "https://api.github.com/repos/{}/commits?ref={}&path={}&per_page=1",
+            "https://api.github.com/repos/{}/commits?sha={}&path={}&per_page=1",
             self.slug,
             urlencoding::encode(&self.r#ref),
             urlencoding::encode(&self.path)
+        )
+    }
+
+    pub fn contents_url(&self) -> String {
+        fn encode_path_segments(path: &str) -> String {
+            path.split('/')
+                .map(|part| urlencoding::encode(part).into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        }
+        format!(
+            "https://api.github.com/repos/{}/contents/{}?ref={}",
+            self.slug,
+            encode_path_segments(&self.path),
+            urlencoding::encode(&self.sha)
         )
     }
 }
@@ -235,6 +270,7 @@ mod tests {
         let github_url = GitHubUrl {
             slug: "anthropics/skills".to_string(),
             r#ref: "main".to_string(),
+            sha: "main".to_string(),
             path: "skills/frontend-design".to_string(),
         };
 
@@ -242,6 +278,52 @@ mod tests {
             github_url.tarball_url(),
             "https://api.github.com/repos/anthropics/skills/tarball/main"
         );
+    }
+
+    #[test]
+    fn test_commits_url_uses_sha_param() {
+        let github_url = GitHubUrl {
+            slug: "owner/repo".to_string(),
+            r#ref: "feature/foo".to_string(),
+            sha: "resolved-sha".to_string(),
+            path: "skills/my skill".to_string(),
+        };
+
+        assert_eq!(
+            github_url.commits_url(),
+            "https://api.github.com/repos/owner/repo/commits?sha=feature%2Ffoo&path=skills%2Fmy%20skill&per_page=1"
+        );
+    }
+
+    #[test]
+    fn test_contents_url_encodes_path_segments() {
+        let github_url = GitHubUrl {
+            slug: "owner/repo".to_string(),
+            r#ref: "release/v1.0".to_string(),
+            sha: "abc123".to_string(),
+            path: "skills/my skill".to_string(),
+        };
+
+        assert_eq!(
+            github_url.contents_url(),
+            "https://api.github.com/repos/owner/repo/contents/skills/my%20skill?ref=abc123"
+        );
+    }
+
+    #[test]
+    fn test_child_url_uses_parent_sha() {
+        let github_url = GitHubUrl {
+            slug: "owner/repo".to_string(),
+            r#ref: "release/v1.0".to_string(),
+            sha: "resolved-parent-sha".to_string(),
+            path: "skills".to_string(),
+        };
+        let child = github_url.child("frontend-design");
+
+        assert_eq!(child.slug, "owner/repo");
+        assert_eq!(child.r#ref, "resolved-parent-sha");
+        assert_eq!(child.sha, "resolved-parent-sha");
+        assert_eq!(child.path, "skills/frontend-design");
     }
 
     #[test]

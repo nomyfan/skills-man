@@ -4,10 +4,12 @@ use crate::{
 };
 use flate2::read::GzDecoder;
 use serde::Deserialize;
-use std::{env, fs, path::Path};
+use std::{env, fs, path::PathBuf};
 use tar::Archive;
 use ureq::typestate::WithoutBody;
 use ureq::{RequestBuilder, config::Config};
+
+const GITHUB_API_VERSION: &str = "2026-03-10";
 
 fn proxy_from_env() -> Option<String> {
     for key in [
@@ -41,11 +43,34 @@ fn github_token_from_env() -> Option<String> {
 }
 
 fn config_github_request(request: RequestBuilder<WithoutBody>) -> RequestBuilder<WithoutBody> {
-    let mut request = request.header("User-Agent", "skills-man");
+    let mut request = request
+        .header("User-Agent", "skills-man")
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION);
     if let Some(token) = github_token_from_env() {
         request = request.header("Authorization", &format!("Bearer {token}"));
     }
     request
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ResolvedSkill {
+    pub name: String,
+    pub source_url: String,
+    pub slug: String,
+    pub sha: String,
+    pub path: String,
+}
+
+#[derive(Debug)]
+pub(super) struct InstallPlan {
+    pub tarball_url: String,
+    pub is_batch: bool,
+    pub skills: Vec<ResolvedSkill>,
+}
+
+pub(super) struct ExtractTarget {
+    pub path: String,
+    pub dest_dir: PathBuf,
 }
 
 pub(super) fn create_agent() -> SkillsResult<ureq::Agent> {
@@ -61,23 +86,26 @@ pub(super) fn create_agent() -> SkillsResult<ureq::Agent> {
 
 pub(super) fn download_and_extract(
     agent: &ureq::Agent,
-    github_url: &GitHubUrl,
-    dest_dir: &Path,
+    url: &str,
+    targets: &[ExtractTarget],
 ) -> SkillsResult<()> {
-    let url = github_url.tarball_url();
-    let response = match config_github_request(agent.get(&url))
+    let response = match config_github_request(agent.get(url))
         .header("Accept", "application/vnd.github+json")
         .call()
     {
         Ok(response) => response,
         Err(ureq::Error::StatusCode(status)) => {
             return Err(match status {
-                404 => SkillsError::NotFound { url },
-                403 => SkillsError::Forbidden { url },
+                404 => SkillsError::NotFound {
+                    url: url.to_string(),
+                },
+                403 => SkillsError::Forbidden {
+                    url: url.to_string(),
+                },
                 429 => SkillsError::RateLimited,
                 _ => SkillsError::HttpError {
                     status,
-                    message: url,
+                    message: url.to_string(),
                 },
             });
         }
@@ -87,7 +115,7 @@ pub(super) fn download_and_extract(
     let decoder = GzDecoder::new(response.into_body().into_reader());
     let mut archive = Archive::new(decoder);
 
-    let mut found_any = false;
+    let mut found = vec![false; targets.len()];
     let mut top_level_dir: Option<String> = None;
 
     for entry in archive
@@ -107,23 +135,33 @@ pub(super) fn download_and_extract(
         }
 
         if let Some(ref top_dir) = top_level_dir {
-            let expected_prefix = format!("{}/{}/", top_dir, github_url.path);
-            if entry_str.starts_with(&expected_prefix) {
-                let relative = &entry_str[expected_prefix.len()..];
-                if !relative.is_empty() {
-                    found_any = true;
-                    let dest_path = dest_dir.join(relative);
+            for (idx, target) in targets.iter().enumerate() {
+                let expected_prefix = format!("{}/{}/", top_dir, target.path);
+                if entry_str.starts_with(&expected_prefix) {
+                    let relative = &entry_str[expected_prefix.len()..];
+                    if relative.is_empty() {
+                        break;
+                    }
+                    found[idx] = true;
+                    let dest_path = target.dest_dir.join(relative);
                     if let Some(parent) = dest_path.parent() {
                         fs::create_dir_all(parent)?;
                     }
                     entry.unpack(&dest_path)?;
+                    break;
                 }
             }
         }
     }
 
-    if !found_any {
-        return SkillsError::PathNotFound(github_url.path.clone()).into();
+    let missing_paths: Vec<_> = targets
+        .iter()
+        .zip(found)
+        .filter_map(|(target, found)| (!found).then_some(target.path.clone()))
+        .collect();
+
+    if !missing_paths.is_empty() {
+        return SkillsError::PathNotFound(missing_paths).into();
     }
 
     Ok(())
@@ -171,10 +209,7 @@ pub(crate) fn resolve(
     for candidate in spec.candidates() {
         let sha = resolve_commit_sha(agent, &candidate)?;
         if let Some(sha) = sha {
-            return Ok(Some(GitHubUrl {
-                r#ref: sha,
-                ..candidate
-            }));
+            return Ok(Some(candidate.with_sha(sha)));
         }
     }
     Ok(None)
@@ -198,10 +233,7 @@ fn list_directory_contents(
     agent: &ureq::Agent,
     github_url: &GitHubUrl,
 ) -> SkillsResult<Vec<ContentItem>> {
-    let url = format!(
-        "https://api.github.com/repos/{}/contents/{}?ref={}",
-        github_url.slug, github_url.path, github_url.r#ref
-    );
+    let url = github_url.contents_url();
 
     match config_github_request(agent.get(&url))
         .header("Accept", "application/vnd.github+json")
@@ -215,7 +247,7 @@ fn list_directory_contents(
             Ok(items)
         }
         Err(ureq::Error::StatusCode(status)) => match status {
-            404 => Err(SkillsError::PathNotFound(github_url.path.clone())),
+            404 => Err(SkillsError::PathNotFound(vec![github_url.path.clone()])),
             403 => Err(SkillsError::Forbidden { url }),
             429 => Err(SkillsError::RateLimited),
             _ => Err(SkillsError::HttpError {
@@ -255,6 +287,7 @@ pub(super) fn detect_skill_type(
         let child_url = GitHubUrl {
             slug: github_url.slug.clone(),
             r#ref: github_url.r#ref.clone(),
+            sha: github_url.sha.clone(),
             path: format!("{}/{}", github_url.path, subdir.name),
         };
 
@@ -273,4 +306,55 @@ pub(super) fn detect_skill_type(
     }
 
     Ok(SkillDetectionResult::Batch(skill_dirs))
+}
+
+pub(super) fn resolve_install_plan(
+    agent: &ureq::Agent,
+    source_url: &str,
+    spec: &GitHubUrlSpec,
+) -> SkillsResult<Option<InstallPlan>> {
+    let Some(resolved) = resolve(agent, spec)? else {
+        return Ok(None);
+    };
+
+    let plan = match detect_skill_type(agent, &resolved)? {
+        SkillDetectionResult::Single => InstallPlan {
+            tarball_url: resolved.tarball_url(),
+            is_batch: false,
+            skills: vec![ResolvedSkill {
+                name: spec.directory_name().to_string(),
+                source_url: source_url.to_string(),
+                slug: resolved.slug,
+                sha: resolved.sha,
+                path: resolved.path,
+            }],
+        },
+        SkillDetectionResult::Batch(subdirs) => {
+            let mut skills = Vec::new();
+            for subdir in subdirs {
+                let child_source_url = format!("{}/{}", source_url, subdir);
+                let child_candidate = resolved.child(&subdir);
+                let Some(child_sha) = resolve_commit_sha(agent, &child_candidate)? else {
+                    return Err(SkillsError::PathNotFound(vec![child_source_url]));
+                };
+                let child_resolved = child_candidate.with_sha(child_sha);
+
+                skills.push(ResolvedSkill {
+                    name: subdir,
+                    source_url: child_source_url,
+                    slug: child_resolved.slug,
+                    sha: child_resolved.sha,
+                    path: child_resolved.path,
+                });
+            }
+
+            InstallPlan {
+                tarball_url: resolved.tarball_url(),
+                is_batch: true,
+                skills,
+            }
+        }
+    };
+
+    Ok(Some(plan))
 }
