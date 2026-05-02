@@ -1,8 +1,4 @@
-use crate::{
-    errors::SkillsResult,
-    models::SkillsConfig,
-    providers::ProviderRegistry,
-};
+use crate::{errors::SkillsResult, models::SkillsConfig, providers::ProviderRegistry};
 use std::path::Path;
 
 use super::install::install_skill;

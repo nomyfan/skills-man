@@ -227,8 +227,7 @@ impl GitHubProvider {
             .entries()
             .map_err(|e| SkillsError::InvalidArchive(e.to_string()))?
         {
-            let mut entry =
-                entry.map_err(|e| SkillsError::InvalidArchive(e.to_string()))?;
+            let mut entry = entry.map_err(|e| SkillsError::InvalidArchive(e.to_string()))?;
             let entry_path = entry
                 .path()
                 .map_err(|e| SkillsError::InvalidArchive(e.to_string()))?;
@@ -317,10 +316,7 @@ impl GitHubProvider {
         Ok(None)
     }
 
-    fn list_directory_contents(
-        &self,
-        github_url: &GitHubUrl,
-    ) -> SkillsResult<Vec<ContentItem>> {
+    fn list_directory_contents(&self, github_url: &GitHubUrl) -> SkillsResult<Vec<ContentItem>> {
         let url = github_url.contents_url();
 
         match config_github_request(self.agent.get(&url))
@@ -347,10 +343,7 @@ impl GitHubProvider {
         }
     }
 
-    fn detect_skill_type(
-        &self,
-        github_url: &GitHubUrl,
-    ) -> SkillsResult<SkillDetectionResult> {
+    fn detect_skill_type(&self, github_url: &GitHubUrl) -> SkillsResult<SkillDetectionResult> {
         let contents = self.list_directory_contents(github_url)?;
 
         let has_skill_manifest = contents
@@ -361,8 +354,10 @@ impl GitHubProvider {
             return Ok(SkillDetectionResult::Single);
         }
 
-        let subdirs: Vec<&ContentItem> =
-            contents.iter().filter(|item| item.item_type == "dir").collect();
+        let subdirs: Vec<&ContentItem> = contents
+            .iter()
+            .filter(|item| item.item_type == "dir")
+            .collect();
 
         let mut skill_dirs = Vec::new();
 
@@ -447,11 +442,7 @@ impl SkillProvider for GitHubProvider {
         Ok(plan)
     }
 
-    fn fetch_and_extract(
-        &self,
-        archive_url: &str,
-        targets: &[ExtractTarget],
-    ) -> SkillsResult<()> {
+    fn fetch_and_extract(&self, archive_url: &str, targets: &[ExtractTarget]) -> SkillsResult<()> {
         self.download_and_extract(archive_url, targets)
     }
 

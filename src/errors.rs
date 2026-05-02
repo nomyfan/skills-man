@@ -124,10 +124,7 @@ impl fmt::Display for SkillsError {
                 Ok(())
             }
             SkillsError::UnsupportedProvider(url) => {
-                write!(
-                    f,
-                    "No provider available that supports the URL: {url}"
-                )
+                write!(f, "No provider available that supports the URL: {url}")
             }
         }
     }

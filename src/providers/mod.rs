@@ -32,11 +32,7 @@ pub trait SkillProvider: Send + Sync {
 
     fn resolve_install_plan(&self, url: &str) -> SkillsResult<InstallPlan>;
 
-    fn fetch_and_extract(
-        &self,
-        archive_url: &str,
-        targets: &[ExtractTarget],
-    ) -> SkillsResult<()>;
+    fn fetch_and_extract(&self, archive_url: &str, targets: &[ExtractTarget]) -> SkillsResult<()>;
 
     fn archive_url_for_entry(&self, entry: &SkillEntry) -> String;
 }

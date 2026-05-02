@@ -5,7 +5,7 @@ mod providers;
 mod utils;
 
 use clap::{Parser, Subcommand};
-use providers::{github::GitHubProvider, ProviderRegistry};
+use providers::{ProviderRegistry, github::GitHubProvider};
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsString,
