@@ -391,6 +391,9 @@ impl SkillProvider for GitHubProvider {
         url.starts_with("https://github.com/")
     }
 
+    /// Parse a GitHub tree URL, resolve refs to SHAs via the commits API,
+    /// detect single vs batch skill layout via the contents API, and return
+    /// an [`InstallPlan`] with a tarball URL for the resolved SHA.
     fn resolve_install_plan(&self, url: &str) -> SkillsResult<InstallPlan> {
         let source_url = url.trim_end_matches('/');
         let spec = GitHubUrlSpec::parse(source_url)?;
