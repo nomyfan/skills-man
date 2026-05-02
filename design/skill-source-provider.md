@@ -149,7 +149,7 @@ src/
   - Purpose: 建立公共类型基础，后续 trait 和 impl 都依赖它
   - Verification: `cargo check` 无报错
 
-- [ ] **[定义接口]** 在 `src/providers/mod.rs` 中声明 `SkillProvider` trait 和 `ProviderRegistry`；在 `errors.rs` 新增 `UnsupportedProvider` 变体
+- [x] **[定义接口]** 在 `src/providers/mod.rs` 中声明 `SkillProvider` trait 和 `ProviderRegistry`；在 `errors.rs` 新增 `UnsupportedProvider` 变体
   - Purpose: 锁定调用侧约定，后续两端可以独立开发
   - Verification: `cargo check`
 

@@ -51,6 +51,9 @@ pub enum SkillsError {
         successful: usize,
         failed: Vec<String>,
     },
+
+    // No registered provider can handle the given URL
+    UnsupportedProvider(String),
 }
 
 pub type SkillsResult<T> = Result<T, SkillsError>;
@@ -119,6 +122,12 @@ impl fmt::Display for SkillsError {
                     writeln!(f, "  - {}", skill)?;
                 }
                 Ok(())
+            }
+            SkillsError::UnsupportedProvider(url) => {
+                write!(
+                    f,
+                    "No provider available that supports the URL: {url}"
+                )
             }
         }
     }
