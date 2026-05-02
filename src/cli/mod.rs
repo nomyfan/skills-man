@@ -1,4 +1,3 @@
-mod github;
 mod install;
 mod list;
 mod prompt;

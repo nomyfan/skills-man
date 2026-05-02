@@ -161,6 +161,6 @@ src/
   - Purpose: 打通端到端流程
   - Verification: `cargo run -- install <github-url>` 和 `sync` 手动验证
 
-- [ ] **[清理]** 删除 `cli/github.rs`，更新 `cli/mod.rs` 导出
-  - Purpose: 消除旧代码，避免两份逻辑并存
+- [x] **[清理]** 删除 `cli/github.rs`，更新 `cli/mod.rs` 导出，将 `GitHubUrl` / `GitHubUrlSpec` 从 `models.rs` 移入 `providers/github.rs`
+  - Purpose: 消除旧代码，避免两份逻辑并存；GitHub 相关模型收敛到 provider 模块内
   - Verification: `cargo test && cargo clippy`
