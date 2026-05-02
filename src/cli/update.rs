@@ -1,9 +1,18 @@
-use crate::{errors::SkillsResult, models::SkillsConfig};
+use crate::{
+    errors::SkillsResult,
+    models::SkillsConfig,
+    providers::ProviderRegistry,
+};
 use std::path::Path;
 
 use super::install::install_skill;
 
-pub fn update_skill(name: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> {
+pub fn update_skill(
+    name: &str,
+    base_dir: &Path,
+    yes: bool,
+    registry: &ProviderRegistry,
+) -> SkillsResult<()> {
     let config_path = base_dir.join("skills.toml");
     let config = SkillsConfig::from_file(&config_path)?;
 
@@ -12,5 +21,5 @@ pub fn update_skill(name: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> 
         return Ok(());
     };
 
-    install_skill(&entry.source_url, base_dir, yes)
+    install_skill(&entry.source_url, base_dir, yes, registry)
 }

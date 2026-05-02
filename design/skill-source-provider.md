@@ -157,7 +157,7 @@ src/
   - Purpose: 验证 trait 设计能完整表达现有 GitHub 流程
   - Verification: `cargo test` 全绿，行为与重构前一致
 
-- [ ] **[接入 CLI]** `install.rs` / `sync.rs` 接收 `&ProviderRegistry`，通过 `registry.get(url)` 路由；`main.rs` 构造 `ProviderRegistry::new(vec![Box::new(GitHubProvider::new())])`
+- [x] **[接入 CLI]** `install.rs` / `sync.rs` 接收 `&ProviderRegistry`，通过 `registry.get(url)` 路由；`main.rs` 构造 `ProviderRegistry::new(vec![Box::new(GitHubProvider::new())])`
   - Purpose: 打通端到端流程
   - Verification: `cargo run -- install <github-url>` 和 `sync` 手动验证
 
