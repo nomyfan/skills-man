@@ -1,30 +1,26 @@
 use crate::{
-    cli::github::{
-        ExtractTarget, InstallPlan, ResolvedSkill, create_agent, download_and_extract,
-        resolve_install_plan,
-    },
     errors::{SkillsError, SkillsResult},
-    models::{GitHubUrlSpec, SkillEntry, SkillsConfig},
+    models::{SkillEntry, SkillsConfig},
+    providers::{ExtractTarget, InstallPlan, ProviderRegistry, ResolvedSkill, SkillProvider},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
 use std::{fs, path::Path};
 
 use super::prompt::confirm_action_or_yes;
 
-pub fn install_skill(url: &str, base_dir: &Path, yes: bool) -> SkillsResult<()> {
-    let url = url.trim_end_matches('/');
-    let spec = GitHubUrlSpec::parse(url)?;
-
-    let agent = create_agent()?;
-    let Some(plan) = resolve_install_plan(&agent, url, &spec)? else {
-        return Err(SkillsError::PathNotFound(vec![url.to_string()]));
-    };
-
-    install_plan(&agent, plan, base_dir, yes)
+pub fn install_skill(
+    url: &str,
+    base_dir: &Path,
+    yes: bool,
+    registry: &ProviderRegistry,
+) -> SkillsResult<()> {
+    let provider = registry.get(url)?;
+    let plan = provider.resolve_install_plan(url)?;
+    install_plan(provider, plan, base_dir, yes)
 }
 
 fn install_plan(
-    agent: &ureq::Agent,
+    provider: &dyn SkillProvider,
     plan: InstallPlan,
     base_dir: &Path,
     yes: bool,
@@ -34,7 +30,7 @@ fn install_plan(
 
     let mut config = SkillsConfig::from_file(&config_path)?;
     let InstallPlan {
-        tarball_url,
+        archive_url,
         is_batch,
         skills,
     } = plan;
@@ -82,7 +78,7 @@ fn install_plan(
         })
         .collect();
 
-    if let Err(e) = download_and_extract(agent, &tarball_url, &targets) {
+    if let Err(e) = provider.fetch_and_extract(&archive_url, &targets) {
         fs::remove_dir_all(&temp_root).ok();
         return Err(e);
     }

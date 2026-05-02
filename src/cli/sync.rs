@@ -1,17 +1,14 @@
 use crate::{
-    cli::github::create_agent,
     errors::SkillsResult,
-    models::{GitHubUrl, SkillsConfig},
+    models::SkillsConfig,
+    providers::{ExtractTarget, ProviderRegistry},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
 use std::{fs, path::Path};
 
-use super::{
-    github::{ExtractTarget, download_and_extract},
-    prompt::confirm_action,
-};
+use super::prompt::confirm_action;
 
-pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
+pub fn sync_skills(base_dir: &Path, registry: &ProviderRegistry) -> SkillsResult<()> {
     let config_path = base_dir.join("skills.toml");
     let mut config = SkillsConfig::from_file(&config_path)?;
 
@@ -23,7 +20,6 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
     }
 
     let skill_names: Vec<String> = config.skills.keys().cloned().collect();
-    let agent = create_agent()?;
 
     for name in skill_names {
         let entry = config.skills.get(&name).unwrap();
@@ -54,11 +50,9 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
         };
 
         if needs_download {
-            let github_url = GitHubUrl {
-                slug: entry.slug.clone(),
-                r#ref: entry.sha.clone(),
-                sha: entry.sha.clone(),
-                path: entry.path.clone(),
+            let Ok(provider) = registry.get(&entry.source_url) else {
+                eprintln!("[{}] No provider available for: {}", name, entry.source_url);
+                continue;
             };
 
             let temp_dir = skills_dir.join(format!(".{}.tmp", name));
@@ -70,12 +64,13 @@ pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
                 continue;
             }
 
+            let archive_url = provider.archive_url_for_entry(entry);
             let target = ExtractTarget {
-                path: github_url.path.clone(),
+                path: entry.path.clone(),
                 dest_dir: temp_dir.clone(),
             };
 
-            match download_and_extract(&agent, &github_url.tarball_url(), &[target]) {
+            match provider.fetch_and_extract(&archive_url, &[target]) {
                 Ok(_) => {
                     if let Err(e) = ensure_skill_manifest(&temp_dir) {
                         eprintln!("[{}] Downloaded but invalid skill: {}", name, e);

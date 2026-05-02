@@ -1,9 +1,11 @@
 mod cli;
 mod errors;
 mod models;
+mod providers;
 mod utils;
 
 use clap::{Parser, Subcommand};
+use providers::{ProviderRegistry, github::GitHubProvider};
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsString,
@@ -126,10 +128,18 @@ fn main() {
 
     load_env_files();
 
+    let registry = match GitHubProvider::new() {
+        Ok(github) => ProviderRegistry::new(vec![Box::new(github)]),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    };
+
     let result = match cli.command {
-        Commands::Install { url, yes } => cli::install_skill(&url, &base_dir, yes),
-        Commands::Sync => cli::sync_skills(&base_dir),
-        Commands::Update { name, yes } => cli::update_skill(&name, &base_dir, yes),
+        Commands::Install { url, yes } => cli::install_skill(&url, &base_dir, yes, &registry),
+        Commands::Sync => cli::sync_skills(&base_dir, &registry),
+        Commands::Update { name, yes } => cli::update_skill(&name, &base_dir, yes, &registry),
         Commands::Uninstall { name } => cli::uninstall_skill(&name, &base_dir),
         Commands::List => cli::list_skills(&base_dir),
     };
