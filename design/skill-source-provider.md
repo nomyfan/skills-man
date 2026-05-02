@@ -153,7 +153,7 @@ src/
   - Purpose: 锁定调用侧约定，后续两端可以独立开发
   - Verification: `cargo check`
 
-- [ ] **[实现 GitHubProvider]** 新建 `src/providers/github.rs`，将 `cli/github.rs` 的逻辑包装进 `struct GitHubProvider(ureq::Agent)` 实现 trait
+- [x] **[实现 GitHubProvider]** 新建 `src/providers/github.rs`，将 `cli/github.rs` 的逻辑包装进 `struct GitHubProvider(ureq::Agent)` 实现 trait
   - Purpose: 验证 trait 设计能完整表达现有 GitHub 流程
   - Verification: `cargo test` 全绿，行为与重构前一致
 

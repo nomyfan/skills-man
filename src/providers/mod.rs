@@ -1,3 +1,5 @@
+pub mod github;
+
 use crate::{
     errors::{SkillsError, SkillsResult},
     models::SkillEntry,
