@@ -286,12 +286,11 @@ impl GitHubProvider {
                 let sha = json
                     .get(0)
                     .and_then(|x| x.get("sha"))
-                    .and_then(|x| x.as_str())
-                    .ok_or_else(|| {
-                        SkillsError::NetworkError("Missing sha in response".to_string())
-                    })?
-                    .to_string();
-                Ok(Some(sha))
+                    .and_then(|x| x.as_str());
+                let Some(sha) = sha else {
+                    return Ok(None);
+                };
+                Ok(Some(sha.to_string()))
             }
             Err(ureq::Error::StatusCode(status)) => match status {
                 404 | 422 => Ok(None),
