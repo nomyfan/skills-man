@@ -1,6 +1,7 @@
 mod cli;
 mod errors;
 mod models;
+mod providers;
 mod utils;
 
 use clap::{Parser, Subcommand};

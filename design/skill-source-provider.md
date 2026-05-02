@@ -145,7 +145,7 @@ src/
 
 ## Implementation Roadmap
 
-- [ ] **[迁移类型]** 新建 `src/providers/mod.rs`，将 `InstallPlan` / `ResolvedSkill` / `ExtractTarget` 从 `cli/github.rs` 移入
+- [x] **[迁移类型]** 新建 `src/providers/mod.rs`，将 `InstallPlan` / `ResolvedSkill` / `ExtractTarget` 从 `cli/github.rs` 移入
   - Purpose: 建立公共类型基础，后续 trait 和 impl 都依赖它
   - Verification: `cargo check` 无报错
 

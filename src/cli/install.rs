@@ -1,10 +1,8 @@
 use crate::{
-    cli::github::{
-        ExtractTarget, InstallPlan, ResolvedSkill, create_agent, download_and_extract,
-        resolve_install_plan,
-    },
+    cli::github::{create_agent, download_and_extract, resolve_install_plan},
     errors::{SkillsError, SkillsResult},
     models::{GitHubUrlSpec, SkillEntry, SkillsConfig},
+    providers::{ExtractTarget, InstallPlan, ResolvedSkill},
     utils::{calculate_checksum, ensure_skill_manifest},
 };
 use std::{fs, path::Path};
@@ -34,7 +32,7 @@ fn install_plan(
 
     let mut config = SkillsConfig::from_file(&config_path)?;
     let InstallPlan {
-        tarball_url,
+        archive_url,
         is_batch,
         skills,
     } = plan;
@@ -82,7 +80,7 @@ fn install_plan(
         })
         .collect();
 
-    if let Err(e) = download_and_extract(agent, &tarball_url, &targets) {
+    if let Err(e) = download_and_extract(agent, &archive_url, &targets) {
         fs::remove_dir_all(&temp_root).ok();
         return Err(e);
     }

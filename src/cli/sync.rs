@@ -1,15 +1,13 @@
 use crate::{
-    cli::github::create_agent,
+    cli::github::{create_agent, download_and_extract},
     errors::SkillsResult,
     models::{GitHubUrl, SkillsConfig},
+    providers::ExtractTarget,
     utils::{calculate_checksum, ensure_skill_manifest},
 };
 use std::{fs, path::Path};
 
-use super::{
-    github::{ExtractTarget, download_and_extract},
-    prompt::confirm_action,
-};
+use super::prompt::confirm_action;
 
 pub fn sync_skills(base_dir: &Path) -> SkillsResult<()> {
     let config_path = base_dir.join("skills.toml");

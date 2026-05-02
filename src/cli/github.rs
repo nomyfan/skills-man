@@ -1,10 +1,11 @@
 use crate::{
     errors::{SkillsError, SkillsResult},
     models::{GitHubUrl, GitHubUrlSpec},
+    providers::{ExtractTarget, InstallPlan, ResolvedSkill},
 };
 use flate2::read::GzDecoder;
 use serde::Deserialize;
-use std::{env, fs, path::PathBuf};
+use std::{env, fs};
 use tar::Archive;
 use ureq::typestate::WithoutBody;
 use ureq::{RequestBuilder, config::Config};
@@ -48,27 +49,6 @@ fn config_github_request(request: RequestBuilder<WithoutBody>) -> RequestBuilder
         request = request.header("Authorization", &format!("Bearer {token}"));
     }
     request
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ResolvedSkill {
-    pub name: String,
-    pub source_url: String,
-    pub slug: String,
-    pub sha: String,
-    pub path: String,
-}
-
-#[derive(Debug)]
-pub(super) struct InstallPlan {
-    pub tarball_url: String,
-    pub is_batch: bool,
-    pub skills: Vec<ResolvedSkill>,
-}
-
-pub(super) struct ExtractTarget {
-    pub path: String,
-    pub dest_dir: PathBuf,
 }
 
 pub(super) fn create_agent() -> SkillsResult<ureq::Agent> {
@@ -317,7 +297,7 @@ pub(super) fn resolve_install_plan(
 
     let plan = match detect_skill_type(agent, &resolved)? {
         SkillDetectionResult::Single => InstallPlan {
-            tarball_url: resolved.tarball_url(),
+            archive_url: resolved.tarball_url(),
             is_batch: false,
             skills: vec![ResolvedSkill {
                 name: spec.directory_name().to_string(),
@@ -347,7 +327,7 @@ pub(super) fn resolve_install_plan(
             }
 
             InstallPlan {
-                tarball_url: resolved.tarball_url(),
+                archive_url: resolved.tarball_url(),
                 is_batch: true,
                 skills,
             }
