@@ -5,6 +5,25 @@ use crate::errors::SkillsError;
 use crate::errors::SkillsResult;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+pub struct AppConfig {
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+}
+
+impl AppConfig {
+    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> SkillsResult<Self> {
+        let path = path.as_ref();
+        if !path.exists() {
+            return Ok(AppConfig::default());
+        }
+        let bytes = std::fs::read(path)?;
+        let config: AppConfig =
+            toml::from_slice(&bytes).map_err(|e| SkillsError::ConfigParseError(e.to_string()))?;
+        Ok(config)
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SkillsConfig {
     #[serde(default)]
     pub skills: BTreeMap<String, SkillEntry>,

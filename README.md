@@ -10,7 +10,7 @@ them in `skills.toml` so you can keep installs clean and up to date.
 - Sync local skills with upstream changes.
 - List, update and uninstall skills.
 - Local and global modes.
-- Load environment variables from `.env` files in the current and global directories.
+- Load environment variables from `~/.skills-man/config.toml`.
 
 ## Quick start
 
@@ -37,17 +37,18 @@ skill uninstall skill-name
 
 ## Environment variables
 
-At startup, `skill` loads environment variables from `.env` files in the global
-directory and current directory. Priority is:
+At startup, `skill` loads environment variables from the global config file.
+Priority is:
 
 1. Existing shell environment variables
-2. Current directory `.env`
-3. Global directory `.env`
+2. `~/.skills-man/config.toml` `[env]` section
 
-Set `GITHUB_TOKEN` or `GH_TOKEN` when installing from GitHub:
+Set `GITHUB_TOKEN` or `GH_TOKEN` in the global config:
 
-```dotenv
-GITHUB_TOKEN=github_pat_...
+```toml
+# ~/.skills-man/config.toml
+[env]
+GITHUB_TOKEN = "github_pat_..."
 ```
 
 The token is sent with GitHub API requests so `skill` can use authenticated rate

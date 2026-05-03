@@ -4,14 +4,14 @@ mod models;
 mod providers;
 mod utils;
 
+use crate::models::AppConfig;
 use clap::{Parser, Subcommand};
 use providers::{ProviderRegistry, github::GitHubProvider};
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsString,
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
-
 #[derive(Parser)]
 #[command(name = "skills-man")]
 #[command(version("0.2.0"))]
@@ -73,40 +73,19 @@ fn get_base_dir(global: bool) -> Result<PathBuf, String> {
     }
 }
 
-fn merge_env_file(
-    path: &Path,
-    protected_env: &HashSet<OsString>,
-    merged_env: &mut HashMap<String, String>,
-) {
-    let Ok(iter) = dotenvy::from_path_iter(path) else {
-        return;
-    };
-
-    for item in iter {
-        let Ok((key, value)) = item else {
-            continue;
-        };
-
-        let key_os = OsString::from(&key);
-        if protected_env.contains(&key_os) {
-            continue;
-        }
-
-        merged_env.insert(key, value);
-    }
-}
-
-fn load_env_files() {
+fn load_config_env(config: &AppConfig) {
     let protected_env = std::env::vars_os()
         .map(|(key, _)| key)
         .collect::<HashSet<_>>();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut merged_env = HashMap::new();
 
-    if let Some(global_dir) = get_global_dir() {
-        merge_env_file(&global_dir.join(".env"), &protected_env, &mut merged_env);
+    for (key, value) in &config.env {
+        let key_os = OsString::from(key.as_str());
+        if protected_env.contains(&key_os) {
+            continue;
+        }
+        merged_env.insert(key.clone(), value.clone());
     }
-    merge_env_file(&cwd.join(".env"), &protected_env, &mut merged_env);
 
     for (key, value) in merged_env {
         // SAFETY: this runs during single-threaded CLI startup, before any
@@ -126,7 +105,17 @@ fn main() {
         }
     };
 
-    load_env_files();
+    let app_config = match get_global_dir() {
+        Some(global_dir) => match AppConfig::from_file(global_dir.join("config.toml")) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Warning: {e}");
+                AppConfig::default()
+            }
+        },
+        None => AppConfig::default(),
+    };
+    load_config_env(&app_config);
 
     let registry = match GitHubProvider::new() {
         Ok(github) => ProviderRegistry::new(vec![Box::new(github)]),
