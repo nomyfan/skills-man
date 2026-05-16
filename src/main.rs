@@ -39,10 +39,13 @@ enum Commands {
     /// Sync installed skills from skills.toml
     Sync,
     #[command(visible_alias = "up")]
-    /// Check upstream and update a single skill
+    /// Check upstream and update a skill
     Update {
         /// Name of the skill to update
         name: String,
+        /// Update the collection containing this skill
+        #[arg(short = 'c', long)]
+        collection: bool,
         /// Automatically answer yes to prompts (non-interactive mode)
         #[arg(short, long)]
         yes: bool,
@@ -128,7 +131,17 @@ fn main() {
     let result = match cli.command {
         Commands::Install { url, yes } => cli::install_skill(&url, &base_dir, yes, &registry),
         Commands::Sync => cli::sync_skills(&base_dir, &registry),
-        Commands::Update { name, yes } => cli::update_skill(&name, &base_dir, yes, &registry),
+        Commands::Update {
+            name,
+            collection,
+            yes,
+        } => {
+            if collection {
+                cli::update_collection_for_skill(&name, &base_dir, yes, &registry)
+            } else {
+                cli::update_skill(&name, &base_dir, yes, &registry)
+            }
+        }
         Commands::Uninstall { name } => cli::uninstall_skill(&name, &base_dir),
         Commands::List => cli::list_skills(&base_dir),
     };

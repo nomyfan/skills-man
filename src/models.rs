@@ -57,6 +57,8 @@ impl SkillsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillEntry {
     pub source_url: String,
+    #[serde(default)]
+    pub collection_url: Option<String>,
     pub slug: String,
     pub path: String,
     pub sha: String,
@@ -104,6 +106,32 @@ mod tests {
     }
 
     #[test]
+    fn test_load_config_without_collection_url() {
+        let temp_dir = std::env::temp_dir().join("skills_test_legacy_config");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let config_path = temp_dir.join("skills.toml");
+
+        fs::write(
+            &config_path,
+            r#"
+[skills.test-skill]
+source_url = "https://github.com/owner/repo/tree/main/path"
+slug = "owner/repo"
+path = "path"
+sha = "main"
+checksum = "sha256:abc123"
+"#,
+        )
+        .unwrap();
+
+        let config = SkillsConfig::from_file(&config_path).unwrap();
+        let entry = &config.skills["test-skill"];
+        assert_eq!(entry.collection_url, None);
+
+        fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
     fn test_save_and_load_config() {
         let temp_dir = std::env::temp_dir().join("skills_test_config");
         fs::create_dir_all(&temp_dir).unwrap();
@@ -114,6 +142,7 @@ mod tests {
             "test-skill".to_string(),
             SkillEntry {
                 source_url: "https://github.com/owner/repo/tree/main/path".to_string(),
+                collection_url: None,
                 slug: "owner/repo".to_string(),
                 sha: "main".to_string(),
                 path: "path".to_string(),

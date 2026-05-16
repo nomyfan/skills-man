@@ -13,6 +13,8 @@ pub struct ResolvedSkill {
     pub name: String,
     /// The user-provided URL that points to this skill (or the batch root).
     pub source_url: String,
+    /// Root URL of the collection that installed this skill, when applicable.
+    pub collection_url: Option<String>,
     /// Repository identifier in `owner/repo` format.
     pub slug: String,
     /// Pinned commit SHA for reproducible installs.

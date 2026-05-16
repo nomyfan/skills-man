@@ -409,6 +409,7 @@ impl SkillProvider for GitHubProvider {
                 skills: vec![ResolvedSkill {
                     name: spec.directory_name().to_string(),
                     source_url: source_url.to_string(),
+                    collection_url: None,
                     slug: resolved.slug,
                     sha: resolved.sha,
                     path: resolved.path,
@@ -427,6 +428,7 @@ impl SkillProvider for GitHubProvider {
                     skills.push(ResolvedSkill {
                         name: subdir,
                         source_url: child_source_url,
+                        collection_url: Some(source_url.to_string()),
                         slug: child_resolved.slug,
                         sha: child_resolved.sha,
                         path: child_resolved.path,

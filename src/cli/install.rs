@@ -136,10 +136,13 @@ fn should_install_skill(
         && checksum == existing.checksum
     {
         if skill.sha == existing.sha {
-            if existing.source_url != skill.source_url
-                && let Some(entry) = config.skills.get_mut(&skill.name)
-            {
-                entry.source_url = skill.source_url.clone();
+            if let Some(entry) = config.skills.get_mut(&skill.name) {
+                if entry.source_url != skill.source_url {
+                    entry.source_url = skill.source_url.clone();
+                }
+                if entry.collection_url != skill.collection_url {
+                    entry.collection_url = skill.collection_url.clone();
+                }
             }
             println!(
                 "Skill '{}' is already installed and up to date.",
@@ -181,6 +184,7 @@ fn finalize_skill_install(
 
     let entry = SkillEntry {
         source_url: skill.source_url.clone(),
+        collection_url: skill.collection_url.clone(),
         slug: skill.slug.clone(),
         sha: skill.sha.clone(),
         path: skill.path.clone(),

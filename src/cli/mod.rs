@@ -9,4 +9,4 @@ pub use install::install_skill;
 pub use list::list_skills;
 pub use sync::sync_skills;
 pub use uninstall::uninstall_skill;
-pub use update::update_skill;
+pub use update::{update_collection_for_skill, update_skill};
