@@ -113,6 +113,15 @@ ln -s ~/.skills-man/skills ~/.gemini/skills
 
 You can share `~/.skills-man/skills.toml` with teammates, run `skill -g sync`, and everyone gets the same skill set.
 
+## Agent skill
+
+This repository includes an Agent skill at `skills-man-cli/`. Install it so an
+AI agent can use and troubleshoot the `skill` CLI:
+
+```bash
+skill -g install https://github.com/nomyfan/skills-man/tree/main/skills-man-cli
+```
+
 ## GitHub URL format
 
 Skills must be referenced with the GitHub "tree" URL that points at a directory:
@@ -127,7 +136,7 @@ contain slashes, so the tool tries multiple candidate splits until one succeeds.
 Examples:
 
 ```
-https://github.com/anthropics/skills/tree/main/skills/frontend-design
+https://github.com/nomyfan/skills-man/tree/main/skills-man-cli
 https://github.com/owner/repo/tree/release/v1.0/path/to/skill
 ```
 

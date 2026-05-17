@@ -23,6 +23,10 @@ pub fn sync_skills(base_dir: &Path, registry: &ProviderRegistry) -> SkillsResult
 
     for name in skill_names {
         let entry = config.skills.get(&name).unwrap();
+        let entry_sha = entry.sha.clone();
+        let entry_source_url = entry.source_url.clone();
+        let entry_path = entry.path.clone();
+        let entry_checksum = entry.checksum.clone();
         let skill_dir = skills_dir.join(&name);
 
         let needs_download = if !skill_dir.exists() {
@@ -30,8 +34,12 @@ pub fn sync_skills(base_dir: &Path, registry: &ProviderRegistry) -> SkillsResult
             true
         } else {
             match calculate_checksum(&skill_dir) {
-                Ok(checksum) if checksum == entry.checksum => {
-                    println!("[{}] Up to date", name);
+                Ok(checksum) if checksum == entry_checksum => {
+                    println!(
+                        "[{}] Up to date ({})",
+                        name,
+                        &entry_sha[..7.min(entry_sha.len())]
+                    );
                     false
                 }
                 Ok(_) => {
@@ -50,8 +58,8 @@ pub fn sync_skills(base_dir: &Path, registry: &ProviderRegistry) -> SkillsResult
         };
 
         if needs_download {
-            let Ok(provider) = registry.get(&entry.source_url) else {
-                eprintln!("[{}] No provider available for: {}", name, entry.source_url);
+            let Ok(provider) = registry.get(&entry_source_url) else {
+                eprintln!("[{}] No provider available for: {}", name, entry_source_url);
                 continue;
             };
 
@@ -64,9 +72,9 @@ pub fn sync_skills(base_dir: &Path, registry: &ProviderRegistry) -> SkillsResult
                 continue;
             }
 
-            let archive_url = provider.archive_url_for_entry(entry);
+            let archive_url = provider.archive_url_for_entry(config.skills.get(&name).unwrap());
             let target = ExtractTarget {
-                path: entry.path.clone(),
+                path: entry_path.clone(),
                 dest_dir: temp_dir.clone(),
             };
 
@@ -87,7 +95,12 @@ pub fn sync_skills(base_dir: &Path, registry: &ProviderRegistry) -> SkillsResult
                                 if let Some(entry) = config.skills.get_mut(&name) {
                                     entry.checksum = checksum;
                                 }
-                                println!("[{}] Downloaded successfully", name);
+                                println!(
+                                    "[{}] Downloaded ({}) → {}",
+                                    name,
+                                    &entry_sha[..7.min(entry_sha.len())],
+                                    skill_dir.display()
+                                );
                             }
                             Err(e) => {
                                 eprintln!(
