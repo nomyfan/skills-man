@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skills Man CLI"
+  short_description: "Use and troubleshoot the skills-man CLI"
+  default_prompt: "Use $skills-man-cli to install, sync, update, list, or uninstall skills with skills-man."
