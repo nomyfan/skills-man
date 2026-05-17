@@ -135,7 +135,9 @@ fn should_install_skill(
         && let Ok(checksum) = calculate_checksum(&skill_dir)
         && checksum == existing.checksum
     {
-        if skill.sha == existing.sha {
+        let old_sha = existing.sha.clone();
+
+        if skill.sha == old_sha {
             if let Some(entry) = config.skills.get_mut(&skill.name) {
                 if entry.source_url != skill.source_url {
                     entry.source_url = skill.source_url.clone();
@@ -145,15 +147,18 @@ fn should_install_skill(
                 }
             }
             println!(
-                "Skill '{}' is already installed and up to date.",
-                skill.name
+                "'{}' is already up to date ({})",
+                skill.name,
+                &old_sha[..7.min(old_sha.len())]
             );
             return false;
         }
 
         println!(
-            "Skill '{}' is already installed. Upstream ref has moved to new commit, updating...",
-            skill.name
+            "Updating '{}': {} → {}",
+            skill.name,
+            &old_sha[..7.min(old_sha.len())],
+            &skill.sha[..7.min(skill.sha.len())]
         );
     }
 
@@ -192,7 +197,10 @@ fn finalize_skill_install(
     };
 
     config.skills.insert(skill.name.clone(), entry);
-    println!("Successfully installed skill '{}'.", skill.name);
+    println!("Installed '{}'", skill.name);
+    println!("  SHA:    {}", &skill.sha[..7.min(skill.sha.len())]);
+    println!("  Source: {}", skill.source_url);
+    println!("  Path:   {}", skill_dir.display());
 
     Ok(())
 }
