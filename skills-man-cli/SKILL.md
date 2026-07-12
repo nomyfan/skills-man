@@ -51,6 +51,8 @@ skill install https://github.com/owner/repo/tree/main/skills
 skill install --yes https://github.com/owner/repo/tree/main/skills
 ```
 
+Re-installing a collection (via `install` or `update --collection`) also detects skills that were removed from the collection upstream. It lists them and, after confirmation (or automatically with `--yes`), deletes their local directory and `skills.toml` entry.
+
 List installed skills:
 
 ```bash
@@ -76,6 +78,8 @@ Update the collection that originally installed a skill:
 ```bash
 skill update --collection skill-name
 ```
+
+This re-installs the collection, so skills removed upstream are also detected and offered for local removal (see collection install above).
 
 Uninstall a skill:
 

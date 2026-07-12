@@ -40,4 +40,6 @@ cargo fmt
 
 **Update detection**: During install, refs are resolved to commit SHAs via GitHub API. Skills are only re-downloaded if the upstream SHA has changed, preventing unnecessary downloads while detecting updates.
 
+**Collection orphan cleanup**: Installing or updating a collection (batch install, shared by `install` and `update --collection` since both funnel into `install_plan`) re-resolves the collection's current skill listing. Any previously tracked skill sharing that `collection_url` but missing from the new listing is offered for local removal (directory + `skills.toml` entry) after confirmation. The removal is persisted to `skills.toml` before the download step for the remaining pending skills, so a later download failure can't leave the config out of sync with the filesystem.
+
 **Integrity**: Directory checksums (SHA256 of all files) detect local modifications during sync operations.

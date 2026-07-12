@@ -52,6 +52,12 @@ pub enum SkillsError {
         failed: Vec<String>,
     },
 
+    // One or more skills dropped from a collection upstream could not be
+    // removed locally
+    BatchRemovalFailed {
+        failed: Vec<String>,
+    },
+
     // No registered provider can handle the given URL
     UnsupportedProvider(String),
 }
@@ -117,6 +123,16 @@ impl fmt::Display for SkillsError {
                 write!(
                     f,
                     "Batch installation completed with failures\n\nSuccessfully installed: {successful}\nFailed skills:\n"
+                )?;
+                for skill in failed {
+                    writeln!(f, "  - {}", skill)?;
+                }
+                Ok(())
+            }
+            SkillsError::BatchRemovalFailed { failed } => {
+                writeln!(
+                    f,
+                    "Failed to remove skills no longer present in the collection:"
                 )?;
                 for skill in failed {
                     writeln!(f, "  - {}", skill)?;
