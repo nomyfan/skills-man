@@ -54,6 +54,47 @@ GITHUB_TOKEN = "github_pat_..."
 The token is sent with GitHub API requests so `skill` can use authenticated rate
 limits and access private repositories that your token is allowed to read.
 
+## TLS trust store
+
+By default `skill` trusts only the Mozilla root certificates bundled into the
+binary. The same build then trusts the same CAs on every machine, and a proxy
+that terminates TLS cannot sit in the middle unnoticed.
+
+That default fails where TLS *is* intercepted — many corporate networks, CI
+sandboxes and cloud dev containers install their proxy's CA into the operating
+system trust store, so `curl` and `git` work while `skill` fails with
+`invalid peer certificate: UnknownIssuer`.
+
+If you trust that proxy, widen the trust store explicitly:
+
+```bash
+# The operating system store, like curl and git use
+SKILLS_MAN_TLS_ROOTS=system skill install https://github.com/owner/repo/tree/main/path/to/skill
+
+# Or specific CAs: a PEM bundle, directories of PEM files, or both together
+SSL_CERT_FILE=/path/to/ca-bundle.pem skill sync
+SSL_CERT_DIR=/etc/ssl/certs:/usr/local/share/ca-certificates skill sync
+```
+
+`SKILLS_MAN_TLS_ROOTS` accepts `system` or `webpki` (the default), and cannot be
+combined with either CA variable: on unix `system` resolves its roots through
+`rustls-native-certs`, which reads those variables *instead of* the operating
+system store whenever either is set, so ranking them would mean one thing on
+Linux and another on macOS. For the same reason an **empty** value still counts
+as set.
+
+Trust is never widened implicitly. A CA configuration that yields no usable trust
+anchors, an unknown `SKILLS_MAN_TLS_ROOTS` value, and a certificate that fails to
+verify are all hard errors rather than a quiet fallback to the bundled roots.
+
+These variables can also live in `~/.skills-man/config.toml`:
+
+```toml
+# ~/.skills-man/config.toml
+[env]
+SKILLS_MAN_TLS_ROOTS = "system"
+```
+
 ## Commands
 
 `skill install <github-url>` (alias: `skill i`)

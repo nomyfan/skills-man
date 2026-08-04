@@ -5,10 +5,14 @@ use crate::{
 };
 use flate2::read::GzDecoder;
 use regex::Regex;
+use rustls_pki_types::CertificateDer;
 use serde::Deserialize;
+use std::ffi::OsStr;
+use std::path::Path;
 use std::sync::OnceLock;
 use std::{env, fs};
 use tar::Archive;
+use ureq::tls::{Certificate, PemItem, RootCerts, TlsConfig, parse_pem};
 use ureq::typestate::WithoutBody;
 use ureq::{RequestBuilder, config::Config};
 
@@ -142,6 +146,157 @@ fn proxy_from_env() -> Option<String> {
     None
 }
 
+const TLS_ROOTS_ENV: &str = "SKILLS_MAN_TLS_ROOTS";
+const CA_BUNDLE_ENV: &str = "SSL_CERT_FILE";
+const CA_BUNDLE_DIR_ENV: &str = "SSL_CERT_DIR";
+
+fn root_certs_from_env() -> SkillsResult<RootCerts> {
+    let strategy = env::var(TLS_ROOTS_ENV).ok();
+    let bundle = env::var_os(CA_BUNDLE_ENV);
+    let bundle_dirs = env::var_os(CA_BUNDLE_DIR_ENV);
+    resolve_root_certs(
+        strategy.as_deref(),
+        bundle.as_deref(),
+        bundle_dirs.as_deref(),
+    )
+}
+
+// Trust anchors default to the Mozilla roots bundled into the binary: the same
+// build then trusts the same CAs on every machine, and a TLS-intercepting proxy
+// cannot slip in unnoticed. Both ways out are opt-in, never a fallback after a
+// failed handshake, so widening trust is always a deliberate act.
+//
+// The two ways out are mutually exclusive rather than ranked. A precedence rule
+// could not be honoured anyway: on unix the platform verifier resolves its roots
+// through rustls-native-certs, which reads SSL_CERT_FILE/SSL_CERT_DIR *instead*
+// of the OS store whenever either is set, so `system` plus a bundle would mean
+// different things on Linux and macOS.
+fn resolve_root_certs(
+    strategy: Option<&str>,
+    bundle: Option<&OsStr>,
+    bundle_dirs: Option<&OsStr>,
+) -> SkillsResult<RootCerts> {
+    let strategy = match strategy.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(strategy) => strategy,
+        // No strategy: the CA variables have to be read here. The bundled roots
+        // ignore them entirely and the platform verifier only honours them on
+        // unix, so this is what gives them the same meaning on every platform.
+        None => return root_certs_from_bundles(bundle, bundle_dirs),
+    };
+
+    let roots = match strategy {
+        // What curl and git trust, including any CA a corporate or sandbox proxy
+        // installed there.
+        "system" => RootCerts::PlatformVerifier,
+        "webpki" => RootCerts::WebPki,
+        other => return SkillsError::InvalidTlsRoots(other.to_string()).into(),
+    };
+
+    // Presence, not content. On unix rustls-native-certs branches on whether the
+    // variable exists at all, so even SSL_CERT_FILE= (set but empty) diverts it
+    // away from the OS store and would leave `system` with no roots whatsoever.
+    let mut conflicting = Vec::new();
+    if bundle.is_some() {
+        conflicting.push(CA_BUNDLE_ENV.to_string());
+    }
+    if bundle_dirs.is_some() {
+        conflicting.push(CA_BUNDLE_DIR_ENV.to_string());
+    }
+    if !conflicting.is_empty() {
+        return SkillsError::ConflictingTlsConfig {
+            strategy: strategy.to_string(),
+            vars: conflicting,
+        }
+        .into();
+    }
+
+    Ok(roots)
+}
+
+// Both CA variables follow the OpenSSL convention that rustls-native-certs also
+// implements, so `system` and the default path agree on what they mean: a PEM
+// file, plus any number of directories of PEM files, unioned together.
+fn root_certs_from_bundles(
+    bundle: Option<&OsStr>,
+    bundle_dirs: Option<&OsStr>,
+) -> SkillsResult<RootCerts> {
+    // Here an empty value really is "not configured": without a strategy the
+    // roots come from these variables alone, and an empty one names no path.
+    let bundle = bundle.filter(|value| !value.is_empty());
+    let bundle_dirs = bundle_dirs.filter(|value| !value.is_empty());
+    if bundle.is_none() && bundle_dirs.is_none() {
+        return Ok(RootCerts::WebPki);
+    }
+
+    let mut loaded = LoadedCerts::default();
+    let mut sources = Vec::new();
+
+    if let Some(path) = bundle {
+        let path = Path::new(path);
+        sources.push(path.display().to_string());
+        let pem = fs::read(path).map_err(|e| SkillsError::InvalidCaBundle {
+            path: path.display().to_string(),
+            reason: e.to_string(),
+        })?;
+        loaded.add_pem(&pem);
+    }
+
+    if let Some(dirs) = bundle_dirs {
+        for dir in env::split_paths(dirs) {
+            sources.push(dir.display().to_string());
+            let entries = fs::read_dir(&dir).map_err(|e| SkillsError::InvalidCaBundle {
+                path: dir.display().to_string(),
+                reason: e.to_string(),
+            })?;
+            // Unreadable entries are skipped rather than fatal: these directories
+            // routinely hold unrelated files, and OpenSSL's c_rehash layout fills
+            // them with symlinks.
+            for entry in entries.flatten() {
+                if let Ok(pem) = fs::read(entry.path()) {
+                    loaded.add_pem(&pem);
+                }
+            }
+        }
+    }
+
+    if loaded.certs.is_empty() {
+        return SkillsError::InvalidCaBundle {
+            path: sources.join(", "),
+            reason: match loaded.unusable {
+                0 => "no certificate found".to_string(),
+                1 => "the only certificate found is not a usable trust anchor".to_string(),
+                n => format!("none of the {n} certificates found is a usable trust anchor"),
+            },
+        }
+        .into();
+    }
+    Ok(loaded.certs.into())
+}
+
+#[derive(Default)]
+struct LoadedCerts {
+    certs: Vec<Certificate<'static>>,
+    unusable: usize,
+}
+
+impl LoadedCerts {
+    fn add_pem(&mut self, pem: &[u8]) {
+        for item in parse_pem(pem).flatten() {
+            let PemItem::Certificate(cert) = item else {
+                continue;
+            };
+            // parse_pem checks only the PEM framing and its base64, so without
+            // decoding the DER too, ureq would silently drop the certificate
+            // later and a broken file would surface as a handshake failure.
+            let der = CertificateDer::from(cert.der());
+            match webpki::anchor_from_trusted_cert(&der) {
+                Ok(_) => self.certs.push(cert),
+                Err(_) => self.unusable += 1,
+            }
+        }
+    }
+}
+
 fn github_token_from_env() -> Option<String> {
     for key in ["GITHUB_TOKEN", "GH_TOKEN"] {
         if let Ok(value) = env::var(key)
@@ -182,15 +337,21 @@ pub struct GitHubProvider {
 
 impl GitHubProvider {
     pub fn new() -> SkillsResult<Self> {
-        let agent = if let Some(proxy_url) = proxy_from_env() {
+        let mut builder = Config::builder().tls_config(
+            TlsConfig::builder()
+                .root_certs(root_certs_from_env()?)
+                .build(),
+        );
+
+        if let Some(proxy_url) = proxy_from_env() {
             let proxy = ureq::Proxy::new(&proxy_url)
                 .map_err(|e| SkillsError::NetworkError(e.to_string()))?;
-            let config = Config::builder().proxy(Some(proxy)).build();
-            ureq::Agent::new_with_config(config)
-        } else {
-            ureq::Agent::new_with_defaults()
-        };
-        Ok(Self { agent })
+            builder = builder.proxy(Some(proxy));
+        }
+
+        Ok(Self {
+            agent: ureq::Agent::new_with_config(builder.build()),
+        })
     }
 
     fn download_and_extract(&self, url: &str, targets: &[ExtractTarget]) -> SkillsResult<()> {
@@ -214,7 +375,7 @@ impl GitHubProvider {
                     },
                 });
             }
-            Err(e) => return SkillsError::NetworkError(e.to_string()).into(),
+            Err(e) => return SkillsError::transport(e.to_string()).into(),
         };
 
         let decoder = GzDecoder::new(response.into_body().into_reader());
@@ -282,7 +443,7 @@ impl GitHubProvider {
                 let json: serde_json::Value = response
                     .into_body()
                     .read_json()
-                    .map_err(|e| SkillsError::NetworkError(e.to_string()))?;
+                    .map_err(|e| SkillsError::transport(e.to_string()))?;
                 let sha = json
                     .get(0)
                     .and_then(|x| x.get("sha"))
@@ -301,7 +462,7 @@ impl GitHubProvider {
                     message: url,
                 }),
             },
-            Err(e) => Err(SkillsError::NetworkError(e.to_string())),
+            Err(e) => Err(SkillsError::transport(e.to_string())),
         }
     }
 
@@ -326,7 +487,7 @@ impl GitHubProvider {
                 let items: Vec<ContentItem> = response
                     .into_body()
                     .read_json()
-                    .map_err(|e| SkillsError::NetworkError(e.to_string()))?;
+                    .map_err(|e| SkillsError::transport(e.to_string()))?;
                 Ok(items)
             }
             Err(ureq::Error::StatusCode(status)) => match status {
@@ -338,7 +499,7 @@ impl GitHubProvider {
                     message: url,
                 }),
             },
-            Err(e) => Err(SkillsError::NetworkError(e.to_string())),
+            Err(e) => Err(SkillsError::transport(e.to_string())),
         }
     }
 
@@ -567,6 +728,235 @@ mod tests {
         };
 
         assert_eq!(github_url.directory_name(), "skill");
+    }
+
+    // Self-signed EC certificate, only ever used as a parseable trust anchor.
+    // anchor_from_trusted_cert does no time validation, so it cannot expire out
+    // from under these tests.
+    const TEST_CA_PEM: &str = "-----BEGIN CERTIFICATE-----\n\
+MIIBkDCCATegAwIBAgIUN8uAwtCoPFgH+V3UmLsaijUZ8o4wCgYIKoZIzj0EAwIw\n\
+HTEbMBkGA1UEAwwSc2tpbGxzLW1hbiB0ZXN0IENBMCAXDTI2MDgwNDEzNDQwN1oY\n\
+DzIxMjYwNzExMTM0NDA3WjAdMRswGQYDVQQDDBJza2lsbHMtbWFuIHRlc3QgQ0Ew\n\
+WTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAR4F+5CPIGPqUmPcfVDPePvq+MQsrrm\n\
+vtphiaRWoTdEQ2OxKTQLGdeKtdPyrLNmhz+GTqp5k72X6c2Q7O54SsLio1MwUTAd\n\
+BgNVHQ4EFgQUvYHpwQNyN0OT4Ey1SZjDceMBd+cwHwYDVR0jBBgwFoAUvYHpwQNy\n\
+N0OT4Ey1SZjDceMBd+cwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNHADBE\n\
+AiAwjFxZKdpSB4Imo2kcMPcG5xpoKb98c46tFew6KG6ougIgJdTSxXnzpwH04VBn\n\
+COHiU9k528QAlWHM6miimGi/m6U=\n\
+-----END CERTIFICATE-----\n";
+
+    // Each test owns its own directory, wiped on entry, so they stay independent
+    // under the default parallel test runner and need no cleanup on the way out.
+    fn temp_case_dir(case: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join("skills_test_ca_bundles")
+            .join(case);
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_root_certs_default_to_bundled_roots() {
+        let result = resolve_root_certs(None, None, None).unwrap();
+        assert!(matches!(result, RootCerts::WebPki));
+    }
+
+    #[test]
+    fn test_root_certs_strategy_selects_trust_store() {
+        assert!(matches!(
+            resolve_root_certs(Some("webpki"), None, None).unwrap(),
+            RootCerts::WebPki
+        ));
+        assert!(matches!(
+            resolve_root_certs(Some(" system "), None, None).unwrap(),
+            RootCerts::PlatformVerifier
+        ));
+    }
+
+    #[test]
+    fn test_root_certs_rejects_strategy_combined_with_ca_bundle() {
+        // Precedence cannot be enforced here: on unix the platform verifier
+        // reads SSL_CERT_FILE/SSL_CERT_DIR instead of the OS store.
+        let result = resolve_root_certs(
+            Some("system"),
+            Some(OsStr::new("/etc/ssl/cert.pem")),
+            Some(OsStr::new("/etc/ssl/certs")),
+        );
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SkillsError::ConflictingTlsConfig { strategy, vars }
+                if strategy == "system" && vars == ["SSL_CERT_FILE", "SSL_CERT_DIR"]
+        ));
+    }
+
+    #[test]
+    fn test_root_certs_rejects_bundled_roots_combined_with_ca_bundle() {
+        let result =
+            resolve_root_certs(Some("webpki"), Some(OsStr::new("/etc/ssl/cert.pem")), None);
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SkillsError::ConflictingTlsConfig { vars, .. } if vars == ["SSL_CERT_FILE"]
+        ));
+    }
+
+    #[test]
+    fn test_root_certs_treats_empty_ca_variables_as_conflicting() {
+        // On unix an empty-but-set SSL_CERT_FILE keeps rustls-native-certs from
+        // reading the OS store, so `system` would end up with no roots at all.
+        let result = resolve_root_certs(Some("system"), Some(OsStr::new("")), None);
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SkillsError::ConflictingTlsConfig { vars, .. } if vars == ["SSL_CERT_FILE"]
+        ));
+
+        let dir_only = resolve_root_certs(Some("system"), None, Some(OsStr::new("")));
+
+        assert!(matches!(
+            dir_only.unwrap_err(),
+            SkillsError::ConflictingTlsConfig { vars, .. } if vars == ["SSL_CERT_DIR"]
+        ));
+    }
+
+    #[test]
+    fn test_root_certs_loads_ca_bundle_directory() {
+        let dir = temp_case_dir("dir_loads");
+        fs::write(dir.join("test-ca.pem"), TEST_CA_PEM).unwrap();
+        fs::write(dir.join("unrelated.txt"), "not a certificate\n").unwrap();
+        fs::create_dir(dir.join("nested")).unwrap();
+
+        let result = resolve_root_certs(None, None, Some(dir.as_os_str())).unwrap();
+
+        assert!(matches!(result, RootCerts::Specific(certs) if certs.len() == 1));
+    }
+
+    #[test]
+    fn test_root_certs_unions_ca_bundle_file_and_directory() {
+        let dir = temp_case_dir("file_and_dir");
+        let file = dir.join("bundle.pem");
+        fs::write(&file, TEST_CA_PEM).unwrap();
+        let certs_dir = dir.join("certs");
+        fs::create_dir(&certs_dir).unwrap();
+        fs::write(certs_dir.join("test-ca.pem"), TEST_CA_PEM).unwrap();
+
+        let result =
+            resolve_root_certs(None, Some(file.as_os_str()), Some(certs_dir.as_os_str())).unwrap();
+
+        assert!(matches!(result, RootCerts::Specific(certs) if certs.len() == 2));
+    }
+
+    #[test]
+    fn test_root_certs_reports_unreadable_ca_bundle_directory() {
+        let result = resolve_root_certs(None, None, Some(OsStr::new("/nonexistent/certs")));
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SkillsError::InvalidCaBundle { path, .. } if path == "/nonexistent/certs"
+        ));
+    }
+
+    #[test]
+    fn test_root_certs_rejects_ca_bundle_directory_without_certificates() {
+        let dir = temp_case_dir("dir_empty");
+        fs::write(dir.join("readme.txt"), "nothing here\n").unwrap();
+
+        let result = resolve_root_certs(None, None, Some(dir.as_os_str()));
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SkillsError::InvalidCaBundle { reason, .. } if reason.contains("no certificate found")
+        ));
+    }
+
+    #[test]
+    fn test_root_certs_rejects_unknown_strategy() {
+        let result = resolve_root_certs(Some("webpkl"), None, None);
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SkillsError::InvalidTlsRoots(value) if value == "webpkl"
+        ));
+    }
+
+    #[test]
+    fn test_root_certs_empty_env_values_fall_back_to_default() {
+        let result =
+            resolve_root_certs(Some("  "), Some(OsStr::new("")), Some(OsStr::new(""))).unwrap();
+        assert!(matches!(result, RootCerts::WebPki));
+    }
+
+    #[test]
+    fn test_root_certs_reports_unreadable_ca_bundle() {
+        let result = resolve_root_certs(None, Some(OsStr::new("/nonexistent/bundle.pem")), None);
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SkillsError::InvalidCaBundle { path, .. } if path == "/nonexistent/bundle.pem"
+        ));
+    }
+
+    #[test]
+    fn test_root_certs_loads_ca_bundle_file() {
+        let path = temp_case_dir("file_loads").join("bundle.pem");
+        fs::write(&path, TEST_CA_PEM).unwrap();
+
+        let result = resolve_root_certs(None, Some(path.as_os_str()), None).unwrap();
+
+        assert!(matches!(result, RootCerts::Specific(certs) if certs.len() == 1));
+    }
+
+    #[test]
+    fn test_root_certs_rejects_ca_bundle_without_certificates() {
+        let path = temp_case_dir("file_empty").join("empty.pem");
+        fs::write(&path, "# nothing to see here\n").unwrap();
+
+        let result = resolve_root_certs(None, Some(path.as_os_str()), None);
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SkillsError::InvalidCaBundle { reason, .. } if reason.contains("no certificate found")
+        ));
+    }
+
+    #[test]
+    fn test_root_certs_rejects_ca_bundle_of_undecodable_certificates() {
+        // Well-formed PEM framing wrapping base64 that is not certificate DER.
+        // ureq would silently drop this and leave an empty root store.
+        let path = temp_case_dir("file_garbage").join("garbage.pem");
+        fs::write(
+            &path,
+            "-----BEGIN CERTIFICATE-----\ndGhpcyBpcyBub3QgYSBjZXJ0aWZpY2F0ZQ==\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
+
+        let result = resolve_root_certs(None, Some(path.as_os_str()), None);
+
+        assert!(matches!(
+            result.unwrap_err(),
+            SkillsError::InvalidCaBundle { reason, .. } if reason.contains("not a usable trust anchor")
+        ));
+    }
+
+    #[test]
+    fn test_transport_error_classifies_certificate_failures() {
+        let unknown_issuer = SkillsError::transport("io: invalid peer certificate: UnknownIssuer");
+        assert!(matches!(unknown_issuer, SkillsError::TlsUnknownIssuer(_)));
+
+        // Widening the trust store would not fix either of these.
+        let expired =
+            SkillsError::transport("io: invalid peer certificate: certificate expired: ...");
+        assert!(matches!(expired, SkillsError::TlsCertInvalid(_)));
+
+        let wrong_host = SkillsError::transport(
+            "io: invalid peer certificate: certificate not valid for name \"example.com\"",
+        );
+        assert!(matches!(wrong_host, SkillsError::TlsCertInvalid(_)));
+
+        let other = SkillsError::transport("io: connection refused");
+        assert!(matches!(other, SkillsError::NetworkError(_)));
     }
 
     #[test]

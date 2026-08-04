@@ -11,8 +11,16 @@ flate2 = "1.1.5"
 tar = "0.4.44"
 walkdir = "2.5.0"
 regex = "1.12.2"
-ureq = { version = "3.1.4", features = ["json", "socks-proxy"] }
+ureq = { version = "3.1.4", features = [
+    "json",
+    "socks-proxy",
+    "platform-verifier",
+] }
 clap = { version = "4.5.54", features = ["derive"] }
+# Already in the tree via ureq. Used only to reject unusable certificates in a
+# user-supplied CA bundle before they reach the TLS config.
+rustls-pki-types = "1.13.2"
+rustls-webpki = "0.103.8"
 serde_json = "1.0.149"
 urlencoding = "2.1.3"
 

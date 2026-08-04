@@ -98,6 +98,25 @@ GITHUB_TOKEN = "github_pat_..."
 
 Shell environment values take priority over `~/.skills-man/config.toml`.
 
+## TLS Trust Store
+
+`skill` trusts only the Mozilla root certificates bundled into the binary, not the operating system store. Where TLS is intercepted by a corporate or sandbox proxy, `curl` and `git` succeed while `skill` fails with:
+
+```text
+TLS certificate verification failed
+
+Reason: io: invalid peer certificate: UnknownIssuer
+```
+
+Widening trust is the user's decision. Report the error and the options; do not export these variables on the user's behalf:
+
+- `SKILLS_MAN_TLS_ROOTS=system` trusts the operating system store, like `curl` and `git`.
+- `SSL_CERT_FILE=/path/ca-bundle.pem` or `SSL_CERT_DIR=/path/certs` trusts specific CAs.
+
+Never combine `SKILLS_MAN_TLS_ROOTS` with `SSL_CERT_FILE` or `SSL_CERT_DIR`; the CLI rejects that combination rather than ranking them. An empty value still counts as set, so `SSL_CERT_FILE=` conflicts too.
+
+These options apply only when the reason mentions `UnknownIssuer`. A `TLS certificate verification failed` error without it may mean the server certificate is expired, not yet valid, issued for another host, or is otherwise invalid; changing the trust store does not help there.
+
 ## Troubleshooting
 
 Use `skill list` to confirm install metadata before update or uninstall.
@@ -111,3 +130,5 @@ Use `--yes` for non-interactive install and update flows.
 Use a full `https://github.com/.../tree/.../...` URL when install reports an invalid URL.
 
 Set `GITHUB_TOKEN` or `GH_TOKEN` when GitHub returns rate-limit, forbidden, or private repository access errors.
+
+Present the trust store options (see TLS Trust Store) when a command fails with `TLS certificate verification failed` **and** the reason mentions `UnknownIssuer`; checking that `curl` reaches the same host confirms basic connectivity and points to a certificate-chain or trust-configuration difference. For any other certificate failure, check the system clock, the host name, and whether something is rewriting the connection instead.
