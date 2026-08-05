@@ -2,21 +2,81 @@ name: ci
 
 on:
   push:
-    tags:
-      - "v*.*.*"
     branches:
       - "main"
     paths-ignore:
       - "*.md"
+      - "skills-man-cli/**"
   pull_request:
     paths-ignore:
       - "*.md"
+      - "skills-man-cli/**"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: ${{ matrix.os }}-cargo
+
+      - name: Test
+        run: cargo test
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
+  prepare-release:
+    if: github.event_name == 'workflow_dispatch'
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve tag from Cargo.toml
+        id: resolve
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "skills-man") | .version')
+          tag="v$version"
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::Tag $tag already exists. Bump the version in Cargo.toml first."
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag from ${{ github.sha }}"
+
   build-release:
+    needs: [check, prepare-release]
+
     strategy:
       fail-fast: false
       matrix:
@@ -32,8 +92,6 @@ jobs:
             targets: "x86_64-pc-windows-msvc"
 
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout
@@ -43,18 +101,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.targets }}
-          components: clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: ${{ matrix.os }}-cargo
-
-      - name: Test
-        run: cargo test
-
-      - name: Clippy
-        run: cargo clippy -- -D warnings
 
       - name: Install zig
         uses: korandoru/setup-zig@v1
@@ -85,11 +136,6 @@ jobs:
             }
           }
 
-      - name: List builds
-        shell: pwsh
-        run: |
-          Get-ChildItem (Join-Path . target)
-
       - name: Archive artifacts
         shell: pwsh
         run: |
@@ -110,16 +156,38 @@ jobs:
             Remove-Item (Join-Path . $targetBinaryName)
           }
 
-          echo "ARCHIVE_PATH=./skill-*" >> $env:GITHUB_ENV
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}
+          path: |
+            skill-*.tar.gz
+            skill-*.zip
+          if-no-files-found: error
 
-      - name: List archive
-        shell: pwsh
-        run: |
-          Get-ChildItem .
+  release:
+    needs: [prepare-release, build-release]
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: List artifacts
+        run: ls -l dist
 
       - name: Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: ${{ env.ARCHIVE_PATH }}
+          tag_name: ${{ needs.prepare-release.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          files: dist/*
