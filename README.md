@@ -14,10 +14,27 @@ them in `skills.toml` so you can keep installs clean and up to date.
 
 ## Quick start
 
-Download a prebuilt binary from GitHub [Releases](https://github.com/nomyfan/skills-man/releases)
+Install the latest release with the install script.
 
-After downloading, extract it and place `skill` in a directory on your `PATH`
-(for example, `/usr/local/bin`).
+macOS / Linux (installs to `~/.local/bin`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nomyfan/skills-man/main/install.sh | sh
+```
+
+Windows PowerShell (installs to `~\.local\bin` and adds it to your user `PATH`):
+
+```powershell
+irm https://raw.githubusercontent.com/nomyfan/skills-man/main/install.ps1 | iex
+```
+
+Set `SKILLS_MAN_INSTALL_DIR` to install somewhere else, for example
+`curl -fsSL .../install.sh | SKILLS_MAN_INSTALL_DIR=~/bin sh`.
+Running the script again upgrades `skill` to the latest release.
+
+Or download a prebuilt binary from GitHub [Releases](https://github.com/nomyfan/skills-man/releases),
+extract it, rename it to `skill` (`skill.exe` on Windows) and place it in a
+directory on your `PATH`.
 
 Or build and install from source:
 
