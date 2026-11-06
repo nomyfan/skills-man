@@ -112,6 +112,28 @@ These variables can also live in `~/.skills-man/config.toml`:
 SKILLS_MAN_TLS_ROOTS = "system"
 ```
 
+## GitHub API mirror
+
+All requests go to `https://api.github.com` by default. To route them through a
+mirror or reverse proxy, set
+`SKILLS_MAN_GITHUB_API_URL`. The value is used as a plain prefix for
+`/repos/...` paths, so any proxy layout works:
+
+```bash
+SKILLS_MAN_GITHUB_API_URL=https://proxy.example.com/api.github.com skill sync
+SKILLS_MAN_GITHUB_API_URL=https://proxy.example.com/https://api.github.com skill sync
+```
+
+Skill URLs passed to `skill install` and stored in `skills.toml` keep the
+`https://github.com/...` form. Note that `GITHUB_TOKEN`/`GH_TOKEN`, when set,
+is sent to the configured host. Archive downloads hit
+`/repos/{owner}/{repo}/tarball/{sha}`, which GitHub answers with a redirect to
+`codeload.github.com`; a proxy that passes that redirect through unchanged sends
+the download around the proxy.
+
+Like the other variables, it can also be set in the `[env]` section of
+`~/.skills-man/config.toml`.
+
 ## Commands
 
 `skill install <github-url>` (alias: `skill i`)

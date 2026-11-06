@@ -20,6 +20,9 @@ pub enum SkillsError {
     // SKILLS_MAN_TLS_ROOTS holds a value that is not a known strategy.
     InvalidTlsRoots(String),
 
+    // SKILLS_MAN_GITHUB_API_URL is not an http(s) URL.
+    InvalidGitHubApiUrl(String),
+
     // Trust roots were configured twice, in ways that cannot both be honoured.
     ConflictingTlsConfig {
         strategy: String,
@@ -127,6 +130,10 @@ impl fmt::Display for SkillsError {
             SkillsError::InvalidTlsRoots(value) => write!(
                 f,
                 "Invalid SKILLS_MAN_TLS_ROOTS value: '{value}'\n\nSupported values:\n  - system   Trust the operating system store, like curl/git\n  - webpki   Trust the bundled Mozilla root certificates (default)\n\nTo trust a specific CA bundle instead, unset SKILLS_MAN_TLS_ROOTS and set\nSSL_CERT_FILE to a PEM file."
+            ),
+            SkillsError::InvalidGitHubApiUrl(value) => write!(
+                f,
+                "Invalid SKILLS_MAN_GITHUB_API_URL value: '{value}'\n\nExpected an http(s) URL that stands in for https://api.github.com, for example:\n  - https://proxy.example.com/api.github.com\n  - https://proxy.example.com/https://api.github.com"
             ),
             SkillsError::ConflictingTlsConfig { strategy, vars } => write!(
                 f,

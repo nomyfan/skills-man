@@ -94,24 +94,26 @@ impl GitHubUrl {
         }
     }
 
-    pub fn tarball_url(&self) -> String {
+    pub fn tarball_url(&self, api_base: &str) -> String {
         format!(
-            "https://api.github.com/repos/{}/tarball/{}",
+            "{}/repos/{}/tarball/{}",
+            api_base,
             self.slug,
             urlencoding::encode(&self.sha)
         )
     }
 
-    pub fn commits_url(&self) -> String {
+    pub fn commits_url(&self, api_base: &str) -> String {
         format!(
-            "https://api.github.com/repos/{}/commits?sha={}&path={}&per_page=1",
+            "{}/repos/{}/commits?sha={}&path={}&per_page=1",
+            api_base,
             self.slug,
             urlencoding::encode(&self.r#ref),
             urlencoding::encode(&self.path)
         )
     }
 
-    pub fn contents_url(&self) -> String {
+    pub fn contents_url(&self, api_base: &str) -> String {
         fn encode_path_segments(path: &str) -> String {
             path.split('/')
                 .map(|part| urlencoding::encode(part).into_owned())
@@ -119,7 +121,8 @@ impl GitHubUrl {
                 .join("/")
         }
         format!(
-            "https://api.github.com/repos/{}/contents/{}?ref={}",
+            "{}/repos/{}/contents/{}?ref={}",
+            api_base,
             self.slug,
             encode_path_segments(&self.path),
             urlencoding::encode(&self.sha)
@@ -297,6 +300,21 @@ impl LoadedCerts {
     }
 }
 
+const GITHUB_API_URL_ENV: &str = "SKILLS_MAN_GITHUB_API_URL";
+const DEFAULT_GITHUB_API_URL: &str = "https://api.github.com";
+
+// The value is used as a plain prefix, so a mirror can take any shape as long as
+// `{base}/repos/...` reaches the matching GitHub API path.
+fn resolve_api_base(value: Option<&str>) -> SkillsResult<String> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(DEFAULT_GITHUB_API_URL.to_string());
+    };
+    if !value.starts_with("https://") && !value.starts_with("http://") {
+        return SkillsError::InvalidGitHubApiUrl(value.to_string()).into();
+    }
+    Ok(value.trim_end_matches('/').to_string())
+}
+
 fn github_token_from_env() -> Option<String> {
     for key in ["GITHUB_TOKEN", "GH_TOKEN"] {
         if let Ok(value) = env::var(key)
@@ -333,6 +351,7 @@ struct ContentItem {
 
 pub struct GitHubProvider {
     agent: ureq::Agent,
+    api_base: String,
 }
 
 impl GitHubProvider {
@@ -351,6 +370,7 @@ impl GitHubProvider {
 
         Ok(Self {
             agent: ureq::Agent::new_with_config(builder.build()),
+            api_base: resolve_api_base(env::var(GITHUB_API_URL_ENV).ok().as_deref())?,
         })
     }
 
@@ -434,7 +454,7 @@ impl GitHubProvider {
     }
 
     fn resolve_commit_sha(&self, github_url: &GitHubUrl) -> SkillsResult<Option<String>> {
-        let url = github_url.commits_url();
+        let url = github_url.commits_url(&self.api_base);
         match config_github_request(self.agent.get(&url))
             .header("Accept", "application/vnd.github+json")
             .call()
@@ -477,7 +497,7 @@ impl GitHubProvider {
     }
 
     fn list_directory_contents(&self, github_url: &GitHubUrl) -> SkillsResult<Vec<ContentItem>> {
-        let url = github_url.contents_url();
+        let url = github_url.contents_url(&self.api_base);
 
         match config_github_request(self.agent.get(&url))
             .header("Accept", "application/vnd.github+json")
@@ -565,7 +585,7 @@ impl SkillProvider for GitHubProvider {
 
         let plan = match self.detect_skill_type(&resolved)? {
             SkillDetectionResult::Single => InstallPlan {
-                archive_url: resolved.tarball_url(),
+                archive_url: resolved.tarball_url(&self.api_base),
                 is_batch: false,
                 skills: vec![ResolvedSkill {
                     name: spec.directory_name().to_string(),
@@ -597,7 +617,7 @@ impl SkillProvider for GitHubProvider {
                 }
 
                 InstallPlan {
-                    archive_url: resolved.tarball_url(),
+                    archive_url: resolved.tarball_url(&self.api_base),
                     is_batch: true,
                     skills,
                 }
@@ -613,7 +633,8 @@ impl SkillProvider for GitHubProvider {
 
     fn archive_url_for_entry(&self, entry: &SkillEntry) -> String {
         format!(
-            "https://api.github.com/repos/{}/tarball/{}",
+            "{}/repos/{}/tarball/{}",
+            self.api_base,
             entry.slug,
             urlencoding::encode(&entry.sha)
         )
@@ -960,6 +981,46 @@ COHiU9k528QAlWHM6miimGi/m6U=\n\
     }
 
     #[test]
+    fn test_api_base_defaults_to_github_when_unset_or_blank() {
+        assert_eq!(resolve_api_base(None).unwrap(), "https://api.github.com");
+        assert_eq!(
+            resolve_api_base(Some("  ")).unwrap(),
+            "https://api.github.com"
+        );
+    }
+
+    #[test]
+    fn test_api_base_strips_trailing_slash() {
+        assert_eq!(
+            resolve_api_base(Some("https://proxy.example.com/api.github.com/")).unwrap(),
+            "https://proxy.example.com/api.github.com"
+        );
+    }
+
+    #[test]
+    fn test_api_base_rejects_value_without_scheme() {
+        assert!(matches!(
+            resolve_api_base(Some("proxy.example.com/api.github.com")),
+            Err(SkillsError::InvalidGitHubApiUrl(value)) if value == "proxy.example.com/api.github.com"
+        ));
+    }
+
+    #[test]
+    fn test_tarball_url_with_proxy_base() {
+        let github_url = GitHubUrl {
+            slug: "anthropics/skills".to_string(),
+            r#ref: "main".to_string(),
+            sha: "main".to_string(),
+            path: "skills/frontend-design".to_string(),
+        };
+
+        assert_eq!(
+            github_url.tarball_url("https://proxy.example.com/https://api.github.com"),
+            "https://proxy.example.com/https://api.github.com/repos/anthropics/skills/tarball/main"
+        );
+    }
+
+    #[test]
     fn test_tarball_url() {
         let github_url = GitHubUrl {
             slug: "anthropics/skills".to_string(),
@@ -969,7 +1030,7 @@ COHiU9k528QAlWHM6miimGi/m6U=\n\
         };
 
         assert_eq!(
-            github_url.tarball_url(),
+            github_url.tarball_url("https://api.github.com"),
             "https://api.github.com/repos/anthropics/skills/tarball/main"
         );
     }
@@ -984,7 +1045,7 @@ COHiU9k528QAlWHM6miimGi/m6U=\n\
         };
 
         assert_eq!(
-            github_url.commits_url(),
+            github_url.commits_url("https://api.github.com"),
             "https://api.github.com/repos/owner/repo/commits?sha=feature%2Ffoo&path=skills%2Fmy%20skill&per_page=1"
         );
     }
@@ -999,7 +1060,7 @@ COHiU9k528QAlWHM6miimGi/m6U=\n\
         };
 
         assert_eq!(
-            github_url.contents_url(),
+            github_url.contents_url("https://api.github.com"),
             "https://api.github.com/repos/owner/repo/contents/skills/my%20skill?ref=abc123"
         );
     }

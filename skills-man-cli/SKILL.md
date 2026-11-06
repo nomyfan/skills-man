@@ -1,6 +1,6 @@
 ---
 name: skills-man-cli
-description: Use the skills-man `skill` CLI to install, sync, update, list, and uninstall AI agent skills from GitHub repositories. Use when a user asks how to manage skills with skills-man, configure global or local skill directories, install a skill or collection from a GitHub tree URL, set GitHub authentication for private repositories, inspect skills.toml state, or troubleshoot common skills-man CLI behavior.
+description: Use the skills-man `skill` CLI to install, sync, update, list, and uninstall AI agent skills from GitHub repositories. Use when a user asks how to manage skills with skills-man, configure global or local skill directories, install a skill or collection from a GitHub tree URL, set GitHub authentication for private repositories, route GitHub API requests through a mirror or reverse proxy, inspect skills.toml state, or troubleshoot common skills-man CLI behavior.
 ---
 
 # Skills Man CLI
@@ -98,6 +98,25 @@ GITHUB_TOKEN = "github_pat_..."
 
 Shell environment values take priority over `~/.skills-man/config.toml`.
 
+## GitHub API Mirror
+
+By default every request goes to `https://api.github.com`. `SKILLS_MAN_GITHUB_API_URL` replaces that base, for users who reach GitHub through a mirror or reverse proxy. The value is a plain prefix for `/repos/...` paths, so any proxy layout works:
+
+```bash
+SKILLS_MAN_GITHUB_API_URL=https://proxy.example.com/api.github.com skill sync
+SKILLS_MAN_GITHUB_API_URL=https://proxy.example.com/https://api.github.com skill sync
+```
+
+It can also be set in the `[env]` section of `~/.skills-man/config.toml`. The value must start with `http://` or `https://`; a trailing `/` is ignored, and an empty value means the default.
+
+Keep install URLs in the `https://github.com/<owner>/<repo>/tree/...` form even when a mirror is set. Only the API requests change; `skills.toml` keeps the GitHub URLs.
+
+Choosing a mirror is the user's decision: `GITHUB_TOKEN`/`GH_TOKEN`, when set, is sent to the mirror host. Do not suggest third-party mirrors or set this variable on the user's behalf.
+
+The mirror must handle the redirect from `/repos/{owner}/{repo}/tarball/{sha}` to `codeload.github.com` itself. If it passes the redirect through unchanged, downloads bypass the mirror.
+
+GitHub Enterprise Server is not supported this way: install URLs must still point to `github.com`.
+
 ## TLS Trust Store
 
 `skill` trusts only the Mozilla root certificates bundled into the binary, not the operating system store. Where TLS is intercepted by a corporate or sandbox proxy, `curl` and `git` succeed while `skill` fails with:
@@ -130,5 +149,7 @@ Use `--yes` for non-interactive install and update flows.
 Use a full `https://github.com/.../tree/.../...` URL when install reports an invalid URL.
 
 Set `GITHUB_TOKEN` or `GH_TOKEN` when GitHub returns rate-limit, forbidden, or private repository access errors.
+
+When an error URL starts with something other than `https://api.github.com`, `SKILLS_MAN_GITHUB_API_URL` is set, in the shell or in `~/.skills-man/config.toml`. Failures such as HTTP 5xx or 404 there may come from the mirror, not GitHub; retrying with the variable unset tells the two apart.
 
 Present the trust store options (see TLS Trust Store) when a command fails with `TLS certificate verification failed` **and** the reason mentions `UnknownIssuer`; checking that `curl` reaches the same host confirms basic connectivity and points to a certificate-chain or trust-configuration difference. For any other certificate failure, check the system clock, the host name, and whether something is rewriting the connection instead.
